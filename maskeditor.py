@@ -1,7 +1,9 @@
 import sys
+import os
 from PyQt6 import QtWidgets
 from PyQt6 import QtGui
-from PyQt6.QtCore import QPoint, QSignalMapper, QSize, Qt, pyqtSignal, pyqtSlot;
+from PyQt6 import QtCore
+from PyQt6.QtCore import QPoint, QSignalMapper, QSize, QStringListModel, Qt, pyqtSignal, pyqtSlot;
 from PyQt6.QtGui import QBitmap, QBrush, QColor, QIntValidator, QMouseEvent, QPainter, QPen, QPixmap
 
 
@@ -38,6 +40,7 @@ class DrawMode:
     EXCLUDE = 1;
 
 class MaskContainer(QtWidgets.QWidget):
+    
     def __init__(self,parent=None):
         super().__init__(parent);
         self.createObjects();
@@ -54,11 +57,20 @@ class MaskContainer(QtWidgets.QWidget):
     def sizeHint(self) -> QSize:
         return self.mask.sizeHint();
 
-    #switches to a specific image,
-    def switchImage(self,image):
-        pass;
+    #switches to a specific image, and loads mask if provided
+    #both image and mask are filenames
+    @pyqtSlot(str,str)
+    def switchImage(self,image,mask=None):
+        self.pixmap = QPixmap(image);
+        self.image.setPixmap(self.pixmap);
+        bmap = QBitmap(mask if mask else self.pixmap.size());
+        if bmap.size() != self.pixmap.size(): #provided mask and image are of different sizes; create new mask
+            bmap = QBitmap(self.pixmap.size());
+        self.mask.loadBitmap(bmap);
 
 class ImageMask(QtWidgets.QLabel):
+    maskUpdate = pyqtSignal(); #whenever mask is changed or a stroke is completed
+
     def __init__(self,parent):
         super().__init__(parent);
         self.createObjects();
@@ -132,8 +144,9 @@ class ImageMask(QtWidgets.QLabel):
     def mousePressEvent(self, ev: QMouseEvent) -> None:
         self.mouseMoveEvent(ev,dot=True);
 
-    def mouseReleaseEvent(self, e):
+    def mouseReleaseEvent(self, e): #guaranteed called whenever mouse released after clicking on pane
         self.lastPos = None;
+        self.maskUpdate.emit();
 
     def reloadPixLayer(self): #TODO: possibly further optimize by saving the pen each time?
         self.pixlayer.fill(self.fgColor)
@@ -145,6 +158,11 @@ class ImageMask(QtWidgets.QLabel):
         pixptr.drawPixmap(0,0,self.bitlayer);
         pixptr.end();
         self.update();
+
+    def loadBitmap(self,bmap):
+        self.bitlayer = bmap;
+        self.reloadPixLayer();
+        self.maskUpdate.emit();
 
     def setFGColor(self,colour):
         self.fgColor = colour;
@@ -268,12 +286,108 @@ class DualToggleButtons(QtWidgets.QWidget):
     def restoreValue(self):
         self.setValue(self.storedValue,overrideStore=True);
         
+class DataPane(QtWidgets.QWidget):
+
+    def __init__(self,parent=None):
+        super().__init__(parent);
+        self.createObjects();
+
+    def createObjects(self):
+        self.selector = ImageSelectorPane();
+
+        self.layout = QtWidgets.QVBoxLayout();
+        self.layout.addWidget(self.selector);
+
+        self.setLayout(self.layout);
+
+class ImageSelectorPane(QtWidgets.QWidget):
+    imageDirectoryChanged = pyqtSignal(str);
+    imageChanged = pyqtSignal(str,str);
+
+    def __init__(self,directory=None,parent=None):
+        super().__init__(parent);
+        self.createObjects(directory);
+
+    def createObjects(self,dire):
+        self.imageDirChooser = DirectorySelector("Select Image Directory:");
+        self.maskDirChooser = DirectorySelector("Select Mask Directory");
+        
+        self.list = QtWidgets.QListView();
+        self.list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection);
+        self.model = QStringListModel(self.list);
+        self.list.setModel(self.model);
+        
+        self.layout = QtWidgets.QVBoxLayout();
+        self.layout.addWidget(self.imageDirChooser);
+        self.layout.addWidget(self.list);
+        self.layout.addWidget(self.maskDirChooser);
+
+        self.setLayout(self.layout);
+        self.imageDirChooser.directoryChanged.connect(self.selectImageDir);
+
+    def selectImageDir(self):
+        self.model.setStringList(os.listdir(self.imageDirChooser.dire));
+        self.list.setCurrentIndex(0);
+        self.imageChanged.emit(self.imageDirChooser.dire+self.getSelectedImageName());
+
+    def selectMaskDir(self):
+        self.imageChanged.emit(self.imageDirChooser.dire+self.getSelectedImageName(),)
+
+    def getSelectedImageName(self):
+        return self.model.stringList()[self.list.currentIndex()];
+
+    def selectImage(self,index):
+        self.list.selectionModel().setCurrentIndex(index);
+        #self.imageChanged.emit();
+
+    @pyqtSlot()
+    def nextImage(self):
+        pass;
+
+class DirectorySelector(QtWidgets.QWidget):
+    directoryChanged = pyqtSignal(str)
+    
+    def __init__(self,title="Select Directory:",startingDirectory=None,parent=None):
+        super().__init__(parent=parent);
+        self.createObjects(title,startingDirectory);
+    
+    def createObjects(self,title,dire):
+        self.dire = dire;
+        self.title = QtWidgets.QLabel(title);
+        self.browseButton = QtWidgets.QPushButton("Browse...");
+        self.browseButton.setSizePolicy(QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed,QtWidgets.QSizePolicy.Policy.Fixed))
+        self.pathLabel = QtWidgets.QLabel();
+        self.fileDialog = QtWidgets.QFileDialog(self);
+        self.fileDialog.setFileMode(QtWidgets.QFileDialog.FileMode.Directory);
+        self.fileDialog.setOption(QtWidgets.QFileDialog.Option.ShowDirsOnly | QtWidgets.QFileDialog.Option.ReadOnly);
+        self.layout = QtWidgets.QGridLayout();
+        self.layout.addWidget(self.title,0,0,1,2);
+        self.layout.addWidget(self.browseButton,1,0);
+        self.layout.addWidget(self.pathLabel,1,1);
+
+        self.directoryChanged.connect(self.pathLabel.setText);
+        self.browseButton.clicked.connect(self.selectDirectory);
+
+    @pyqtSlot()
+    def selectDirectory(self):
+        if (not(self.ifileDialog.exec())):
+            return;
+        self.dire = self.fileDialog.selectedFiles()[0];
+        self.fileDialog.setDirectory(self.dire)
+        self.directoryChanged.emit(self.dire);
+        
+
+
+        
+
+    
+
 
 
 if __name__ == '__main__':
     app = QtWidgets.QApplication(sys.argv)
     window = QtWidgets.QMainWindow();
-    ex = EditorPane(parent=window);
+    ex = DataPane(parent=window);
     window.setCentralWidget(ex);
     window.show();
     app.exec()

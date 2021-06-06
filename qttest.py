@@ -30,9 +30,9 @@ class EditorPane(QtWidgets.QWidget):
         self.toolbar = MaskToolbar();
         self.layout().addWidget(self.mask);
         self.layout().addWidget(self.toolbar);
-        # self.toolbar.slider.valueChanged.connect(self.mask.mask.setBrushSize);
-        # self.toolbar.drawButtons.valueChanged.connect(self.mask.mask.setDrawMode);
-        # self.toolbar.maskCheck.toggled.connect(lambda x: self.mask.mask.setVisible(not(x)));
+        self.toolbar.slider.valueChanged.connect(self.mask.mask.setBrushSize);
+        self.toolbar.drawButtons.valueChanged.connect(self.mask.mask.setDrawMode);
+        self.toolbar.maskCheck.toggled.connect(lambda x: self.mask.mask.setVisible(not(x)));
         self.toolbar.nextPrevButtons.imageIncrement.connect(self.mask.incrementImage)
 
 class DrawMode:
@@ -48,7 +48,7 @@ class MaskContainer(QtWidgets.QWidget):
         self.dire = directory;
         self.filenames = os.listdir(directory);
         self.index = 0;
-        print(self.filenames[0:20]);
+        #print(self.filenames[0:20]);
         self.image = QtWidgets.QLabel(self);
         self.pixmap = QPixmap(directory+"\\"+self.filenames[0]);
         #self.pixmap.fill(QColor(255,0,0));
@@ -69,7 +69,7 @@ class MaskContainer(QtWidgets.QWidget):
         self.index = max(0,min(self.index + direction,len(self.filenames)));
         self.pixmap.swap(QPixmap(self.dire+"\\"+self.filenames[self.index]))
         self.image.setPixmap(self.pixmap);
-        print(f"image incremented: {direction}")
+        #print(f"image incremented: {direction}")
 
 
 class ImageMask(QtWidgets.QLabel):
@@ -90,6 +90,7 @@ class ImageMask(QtWidgets.QLabel):
         self.drawMode = DrawMode.INCLUDE;
         self.bitcolors = [Qt.GlobalColor.color1,Qt.GlobalColor.color0];
         self.bitlayer = QBitmap(initSize);
+        self.bitlayer.fill(self.bitcolors[1])
         self.pixlayer = QPixmap(initSize);
         self.setFixedSize(initSize)
         self.reloadPixLayer();
@@ -263,7 +264,7 @@ class DualToggleButtons(QtWidgets.QWidget): #TODO: replace with a QButtonGroup m
     @pyqtSlot(bool) #from buttons
     def handleClick(self,checked,buttonId):
         if not(checked):
-            print(f"button {buttonId} clicked while checked; rechecking")
+            #print(f"button {buttonId} clicked while checked; rechecking")
             self.buttons[buttonId].setChecked(True);
             return;
         print(f"button {buttonId} clicked while unchecked; unchecking {self.value}")

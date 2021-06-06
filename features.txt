@@ -4,7 +4,8 @@ convenient keyboard shortcuts
 -left/right to switch images
 --no progress lost if accidentally move left/right?
 --alternatively, use tab/ctrl+tab to switch
---ctrl+Scroll for zoom in/outline
+-ctrl+Scroll for zoom in/outline
+-space to show/hide mask
 
 buttons and widgets:
 -fg/bg toggle, updates when shortcut is pressed
@@ -18,6 +19,13 @@ background/foreground color&alpha
 cache/save-some, save-all
 -navigation should feel smooth and fast (same ideaas the shortcuts)
 --thought: have the images in batches of n (5-10); alway have loaded the current, next, and previous batch
+
+Datapane Requirements:
+-select input image directory
+--image browser? scrollpane: can select specific image with click, and displays current image
+-select mask directory [empty or otherwise]
+--no preview
+-possibly: save/load feature where instead of real-time edit, you can save a whole batch of masks?
 
 more difficult/advanced features:
 keyboard shortcut settings / config file
