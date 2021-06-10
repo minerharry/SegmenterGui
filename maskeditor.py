@@ -4,10 +4,7 @@ from PyQt6 import QtWidgets
 from PyQt6 import QtGui
 from PyQt6 import QtCore
 from PyQt6.QtCore import QPoint, QSignalMapper, QSize, QStringListModel, Qt, pyqtSignal, pyqtSlot;
-from PyQt6.QtGui import QBitmap, QBrush, QColor, QIntValidator, QMouseEvent, QPainter, QPen, QPixmap
-
-
-
+from PyQt6.QtGui import QBitmap, QBrush, QColor, QIntValidator, QMouseEvent, QPainter, QPen, QPixmap, QShortcut, QKeySequence;
 
 class Defaults:
     blankSize = QSize(300,300);
@@ -18,7 +15,51 @@ class Defaults:
     maxBrushSize = 80;
     drawButtonNames = ("Include", "Exclude");
     drawButtonsLabel = "Draw Mode";
+
+class MaskSegmenter(QtWidgets.QWidget):
+    def __init__(self,parent=None):
+        super().__init__(parent);
+        self.createObjects();
     
+    def createObjects(self):
+        self.editor = EditorPane();
+        self.data = DataPane();
+
+        self.layout = QtWidgets.QHBoxLayout();
+        self.layout.addWidget(self.data);
+        self.layout.addWidget(self.editor);
+        self.layout.setStretch(1, 2)
+        self.setLayout(self.layout);
+
+        self.ctrl = False;
+        self.shift = False
+
+        self.editor.toolbar.iButtons.imageIncrement.connect(self.data.selector.incrementImage);
+        self.data.selector.imageChanged.connect(self.editor.mask.maskContainer.switchImage);
+
+        QShortcut(QKeySequence("left"),self).activated.connect(lambda: self.data.selector.incrementImage(-1));
+        QShortcut(QKeySequence("right"),self).activated.connect(lambda: self.data.selector.incrementImage(1));
+        QShortcut(QKeySequence("up"),self).activated.connect(lambda: self.editor.toolbar.slider.triggerAction(QtWidgets.QAbstractSlider.SliderAction.SliderSingleStepAdd));
+        QShortcut(QKeySequence("down"),self).activated.connect(lambda: self.editor.toolbar.slider.triggerAction(QtWidgets.QAbstractSlider.SliderAction.SliderSingleStepSub));
+
+    def keyPressEvent(self,ev):
+        super().keyPressEvent(ev);
+        if (Qt.KeyboardModifier.ControlModifier in ev.modifiers()):
+            self.editor.toolbar.drawButtons.setValue(1,store=True);
+            self.ctrl = True;
+            print("control pressed");
+        if (Qt.KeyboardModifier.ShiftModifier in ev.modifiers()):
+            self.editor.toolbar.drawButtons.setValue(0,store=True);
+            self.shift = True;
+            print("shift pressed");
+
+    def keyReleaseEvent(self,ev):
+        if (Qt.KeyboardModifier.ControlModifier not in ev.modifiers() and self.ctrl): 
+            self.editor.toolbar.drawButtons.restoreValue();
+            print("ctrl released")
+        if (Qt.KeyboardModifier.ShiftModifier not in ev.modifiers() and self.shift):
+            self.editor.toolbar.drawButtons.restoreValue();
+            print("shift released")
 
 class EditorPane(QtWidgets.QWidget):
     def __init__(self,parent=None):
@@ -27,20 +68,54 @@ class EditorPane(QtWidgets.QWidget):
     
     def createObjects(self):
         self.setLayout(QtWidgets.QVBoxLayout());
-        self.mask = MaskContainer();
+        self.mask = MaskedImageView();
         self.toolbar = MaskToolbar();
         self.layout().addWidget(self.mask);
         self.layout().addWidget(self.toolbar);
-        self.toolbar.slider.valueChanged.connect(self.mask.mask.setBrushSize);
-        self.toolbar.drawButtons.valueChanged.connect(self.mask.mask.setDrawMode);
-        self.toolbar.maskCheck.toggled.connect(lambda x: self.mask.mask.setVisible(not(x)));
+        self.toolbar.slider.valueChanged.connect(self.mask.maskContainer.mask.setBrushSize);
+        self.toolbar.drawButtons.valueChanged.connect(self.mask.maskContainer.mask.setDrawMode);
+        self.toolbar.maskCheck.toggled.connect(lambda x: self.mask.maskContainer.mask.setVisible(not(x)));
+
+        
+
+class MaskedImageView(QtWidgets.QGraphicsView):
+    wheel_factor = 0.1;
+    def __init__(self,parent=None):
+        super().__init__(parent);
+        self.createObjects();
+
+    def createObjects(self):
+        self.scene = QtWidgets.QGraphicsScene();
+        
+        self.maskContainer = MaskContainer();
+        self.proxy = self.scene.addWidget(self.maskContainer);
+        self.setScene(self.scene);
+        #self.maskContainer.sizeChanged.connect(self.updateProxy);
+
+    #def updateProxy(self):
+        #print(f"Proxy Update called, Container size: {self.maskContainer.size()}");
+        #print(f"Proxy Update called, proxy size: {self.proxy.size()}");
+
+    def wheelEvent(self,event):
+        #print(f"Wheel Event, Container Size: {self.maskContainer.size()}");
+        #print(f"Wheel Event, Proxy Size: {self.proxy.size()}");
+        if (Qt.KeyboardModifier.ControlModifier in event.modifiers()):
+            anchor = self.transformationAnchor();
+            self.setTransformationAnchor(QtWidgets.QGraphicsView.ViewportAnchor.AnchorUnderMouse);
+            angle = event.angleDelta().y();
+            factor = 1 + (1 if angle > 0 else -1)*self.wheel_factor;
+            self.scale(factor, factor);
+            self.setTransformationAnchor(anchor);
+        else:
+            super().wheelEvent(event);
+
 
 class DrawMode:
     INCLUDE = 0;
     EXCLUDE = 1;
 
 class MaskContainer(QtWidgets.QWidget):
-    
+    sizeChanged = pyqtSignal(QSize);
     def __init__(self,parent=None):
         super().__init__(parent);
         self.createObjects();
@@ -51,6 +126,8 @@ class MaskContainer(QtWidgets.QWidget):
         pixmap.fill(QColor(255,0,0));
         self.image.setPixmap(pixmap)
         self.mask = ImageMask(self);
+        self.iFileName = None;
+        self.mFileName = None;
         #print(self.sizeHint())
         
 
@@ -61,12 +138,31 @@ class MaskContainer(QtWidgets.QWidget):
     #both image and mask are filenames
     @pyqtSlot(str,str)
     def switchImage(self,image,mask=None):
-        self.pixmap = QPixmap(image);
-        self.image.setPixmap(self.pixmap);
-        bmap = QBitmap(mask if mask else self.pixmap.size());
-        if bmap.size() != self.pixmap.size(): #provided mask and image are of different sizes; create new mask
-            bmap = QBitmap(self.pixmap.size());
-        self.mask.loadBitmap(bmap);
+        if mask == "":
+            mask = None;
+        print(f"switching image to Mask: {mask}")
+        self.image.setPixmap(QPixmap(image));
+        self.image.setFixedSize(self.image.pixmap().size());
+        self.setFixedSize(self.image.size());
+        #print(f"Image Switched, Container Size: {self.size()}");
+        #print(f"Image Switched, pixmap Size: {self.image.pixmap().size()}")
+        if mask and os.path.exists(mask):
+            bmap = QBitmap(mask);
+            print("creating mask from file")
+        else:
+            print(f"no file, creating empty mask of size {self.image.pixmap().size()}")
+            bmap = QBitmap(self.image.pixmap().size());
+            bmap.clear();
+        if bmap.size() != self.image.pixmap().size(): #provided mask and image are of different sizes; create new mask
+            print(print(f"ERROR: Provided mask file incorrect size, creating empty mask of size {self.image.pixmap().size()}"))
+            bmap = QBitmap(self.image.pixmap().size());
+            bmap.clear();
+        self.mask.loadBitmap(bmap,mask);
+        self.sizeChanged.emit(self.size());
+
+    def resizeEvent(self, ev):
+        print(f"ResizeEvent, Container size: {self.size()}")
+        self.sizeChanged.emit(self.size());
 
 class ImageMask(QtWidgets.QLabel):
     maskUpdate = pyqtSignal(); #whenever mask is changed or a stroke is completed
@@ -77,21 +173,24 @@ class ImageMask(QtWidgets.QLabel):
         self.lastPos = None;
 
     def update(self):
-        super().update();
         self.setPixmap(self.pixlayer);
+        super().update();
 
     def createObjects(self,initSize=Defaults.blankSize):
+        self.fileName = None;
         self.fgColor = Defaults.defaultFG;
         self.bgColor = Defaults.defaultBG;
         self.pen = QPen(Defaults.defaultFG,Defaults.defaultBrushSize,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap,Qt.PenJoinStyle.RoundJoin);
         self.brush = QBrush(Defaults.defaultFG);
         self.drawMode = DrawMode.INCLUDE;
         self.bitcolors = [Qt.GlobalColor.color1,Qt.GlobalColor.color0];
-        self.bitlayer = QBitmap("./image3.png");
+        self.bitlayer = QBitmap(initSize);
+        self.bitlayer.clear();
         self.pixlayer = QPixmap(initSize);
         self.setFixedSize(initSize)
         self.reloadPixLayer();
         self.setPixmap(self.pixlayer);
+        self.maskUpdate.connect(self.save);
 
     def keyPressEvent(self, ev) -> None:
         print('saving...')
@@ -106,9 +205,10 @@ class ImageMask(QtWidgets.QLabel):
 
         colors = [self.fgColor,self.bgColor];
 
+        #print("painting bit");
+        #print(self.bitlayer.paintEngine())
         bitpainter = QPainter(self.bitlayer)
         bitpainter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source);
-        
         if dot:
             self.brush.setColor(self.bitcolors[self.drawMode]);
             bitpainter.setPen(Qt.PenStyle.NoPen)
@@ -121,7 +221,8 @@ class ImageMask(QtWidgets.QLabel):
             bitpainter.drawLine(self.lastPos, e.position())
         bitpainter.end()
         
-        # self.reloadPixLayer();
+        #print("painting pix");
+        #self.reloadPixLayer();
         pixpainter = QPainter(self.pixlayer)
         pixpainter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source);
 
@@ -149,6 +250,7 @@ class ImageMask(QtWidgets.QLabel):
         self.maskUpdate.emit();
 
     def reloadPixLayer(self): #TODO: possibly further optimize by saving the pen each time?
+        self.pixlayer = QPixmap(self.bitlayer.size());
         self.pixlayer.fill(self.fgColor)
         pixptr = QPainter(self.pixlayer);
         pixptr.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source);
@@ -159,9 +261,13 @@ class ImageMask(QtWidgets.QLabel):
         pixptr.end();
         self.update();
 
-    def loadBitmap(self,bmap):
+    def loadBitmap(self,bmap,fName):
         self.bitlayer = bmap;
+        #print(self.bitlayer.size())
+        self.setFixedSize(self.bitlayer.size());
         self.reloadPixLayer();
+        self.fileName = fName;
+        print("Loading mask with filename: " + str(self.fileName));
         self.maskUpdate.emit();
 
     def setFGColor(self,colour):
@@ -178,6 +284,13 @@ class ImageMask(QtWidgets.QLabel):
     @pyqtSlot(int)
     def setBrushSize(self,size):
         self.pen.setWidth(size);
+    
+    @pyqtSlot()
+    def save(self):
+        print(f"attempting save to {self.fileName}");
+        if (self.fileName is not None):
+            self.bitlayer.save(self.fileName);
+
 
 class MaskToolbar(QtWidgets.QWidget):
     def __init__(self,parent=None):
@@ -191,15 +304,18 @@ class MaskToolbar(QtWidgets.QWidget):
         self.slider.editor.setFixedWidth(20);
         self.drawButtons = DualToggleButtons();
         self.maskCheck = QtWidgets.QCheckBox("Hide Mask");
+        self.iButtons = NextPrevButtons();
         self.layout().addWidget(self.slider);
         self.layout().addWidget(self.drawButtons);
-        self.layout().addWidget(self.maskCheck)
+        self.layout().addWidget(self.maskCheck);
+        self.layout().addWidget(self.iButtons);
+        self.layout().insertStretch(-1,2);
 
 class EditableSlider(QtWidgets.QWidget):
     
     valueChanged = pyqtSignal(int); #whenever the value is changed internally
 
-    def __init__(self,bounds=(0,Defaults.maxBrushSize),defaultValue=Defaults.defaultBrushSize,parent=None):
+    def __init__(self,bounds=(1,Defaults.maxBrushSize),defaultValue=Defaults.defaultBrushSize,parent=None):
         super().__init__(parent);
         self.createObjects(bounds,defaultValue);
 
@@ -270,22 +386,50 @@ class DualToggleButtons(QtWidgets.QWidget):
             return;
         print(f"button {buttonId} clicked while unchecked; unchecking {self.value}")
         self.buttons[self.value].setChecked(False);
-        self.setValue(buttonId,overrideStore=True);
+        self.setValue(buttonId,overrideStore=True,updateButtons=False);
         
 
     @pyqtSlot(int) #from elsewhere; use temp=True to store the current value to be recalled later
-    def setValue(self,value,store=False,overrideStore=False):
+    def setValue(self,value,store=False,overrideStore=False,updateButtons=True):
         if store:
             self.storedValue = self.value
         self.value = value;
         if overrideStore:
             self.storedValue = self.value;
         self.valueChanged.emit(self.value);
+        if updateButtons:
+            [button.setChecked(False) for button in self.buttons];
+            self.buttons[self.value].setChecked(True);
 
     @pyqtSlot()
     def restoreValue(self):
-        self.setValue(self.storedValue,overrideStore=True);
-        
+        self.setValue(self.storedValue,overrideStore=True,updateButtons=True);
+
+class NextPrevButtons(QtWidgets.QWidget):
+    imageIncrement = pyqtSignal(int);
+    
+    def __init__(self,parent=None):
+        super().__init__(parent);
+        self.createObjects();
+    
+    def createObjects(self):
+        self.layout = QtWidgets.QHBoxLayout();
+        self.bButton = QtWidgets.QPushButton("Previous Image");
+        self.nButton = QtWidgets.QPushButton("Next Image");
+        self.layout.addWidget(self.bButton);
+        self.layout.addWidget(self.nButton);
+        self.bButton.clicked.connect(self.handleBButton);
+        self.nButton.clicked.connect(self.handleNButton);
+        self.setLayout(self.layout);
+
+    @pyqtSlot()
+    def handleBButton(self):
+        self.imageIncrement.emit(-1);
+
+    @pyqtSlot()
+    def handleNButton(self):
+        self.imageIncrement.emit(1);
+
 class DataPane(QtWidgets.QWidget):
 
     def __init__(self,parent=None):
@@ -314,6 +458,7 @@ class ImageSelectorPane(QtWidgets.QWidget):
         
         self.list = QtWidgets.QListView();
         self.list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection);
+        self.list.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         self.model = QStringListModel(self.list);
         self.list.setModel(self.model);
         
@@ -324,28 +469,41 @@ class ImageSelectorPane(QtWidgets.QWidget):
 
         self.setLayout(self.layout);
         self.imageDirChooser.directoryChanged.connect(self.selectImageDir);
+        self.maskDirChooser.directoryChanged.connect(self.selectMaskDir);
+        self.list.selectionModel().currentChanged.connect(self.changeImage);
 
-    def selectImageDir(self):
+    def selectImageDir(self): #TODO: should this clear the mask directory?
+        print("image dir selected");
         self.model.setStringList(os.listdir(self.imageDirChooser.dire));
-        self.list.setCurrentIndex(0);
-        self.imageChanged.emit(self.imageDirChooser.dire+self.getSelectedImageName());
+        self.list.setCurrentIndex(self.model.index(0));
+        self.changeImage();
 
-    def selectMaskDir(self):
-        self.imageChanged.emit(self.imageDirChooser.dire+self.getSelectedImageName(),)
+    def selectMaskDir(self): #TODO: make the mask retrieval more accessible to other formats
+        print("mask dir selected")
+        self.changeImage();
 
-    def getSelectedImageName(self):
-        return self.model.stringList()[self.list.currentIndex()];
+    def changeImage(self,row=None):
+        if (type(row) == QtCore.QModelIndex):
+            row = row.row();
+        maskPath = (self.maskDirChooser.dire+"/"+os.path.splitext(self.getSelectedImageName(row))[0]+'.bmp') if self.maskDirChooser.dire else None;
+        imagePath = self.imageDirChooser.dire+"/"+self.getSelectedImageName(row);
+        self.imageChanged.emit(imagePath,maskPath);
+
+    def getSelectedImageName(self,row=None):
+        return self.model.stringList()[row if row else self.list.currentIndex().row()];
 
     def selectImage(self,index):
-        self.list.selectionModel().setCurrentIndex(index);
-        #self.imageChanged.emit();
+        print("image selected")
+        self.list.setCurrentIndex(self.model.index(index));
+        self.changeImage(index);
 
-    @pyqtSlot()
-    def nextImage(self):
-        pass;
+    @pyqtSlot(int)
+    def incrementImage(self,inc):
+        if len(self.model.stringList()) > 0:
+            self.selectImage(max(0,min(self.list.currentIndex().row()+inc,len(self.model.stringList())-1)));
 
 class DirectorySelector(QtWidgets.QWidget):
-    directoryChanged = pyqtSignal(str)
+    directoryChanged = pyqtSignal(str);
     
     def __init__(self,title="Select Directory:",startingDirectory=None,parent=None):
         super().__init__(parent=parent);
@@ -365,12 +523,13 @@ class DirectorySelector(QtWidgets.QWidget):
         self.layout.addWidget(self.browseButton,1,0);
         self.layout.addWidget(self.pathLabel,1,1);
 
+        self.setLayout(self.layout)
         self.directoryChanged.connect(self.pathLabel.setText);
         self.browseButton.clicked.connect(self.selectDirectory);
 
     @pyqtSlot()
     def selectDirectory(self):
-        if (not(self.ifileDialog.exec())):
+        if (not(self.fileDialog.exec())):
             return;
         self.dire = self.fileDialog.selectedFiles()[0];
         self.fileDialog.setDirectory(self.dire)
@@ -387,7 +546,7 @@ class DirectorySelector(QtWidgets.QWidget):
 if __name__ == '__main__':
     app = QtWidgets.QApplication(sys.argv)
     window = QtWidgets.QMainWindow();
-    ex = DataPane(parent=window);
+    ex = MaskSegmenter(parent=window);
     window.setCentralWidget(ex);
     window.show();
     app.exec()
