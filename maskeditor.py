@@ -3,8 +3,8 @@ import os
 from PyQt6 import QtWidgets
 from PyQt6 import QtGui
 from PyQt6 import QtCore
-from PyQt6.QtCore import QPoint, QSignalMapper, QSize, QStringListModel, Qt, pyqtSignal, pyqtSlot;
-from PyQt6.QtGui import QBitmap, QBrush, QColor, QIntValidator, QMouseEvent, QPainter, QPen, QPixmap, QShortcut, QKeySequence;
+from PyQt6.QtCore import QPoint, QSignalMapper, QSize, QStringListModel, Qt, pyqtSignal, pyqtSlot, QObject, QEvent
+from PyQt6.QtGui import QBitmap, QBrush, QColor, QIntValidator, QMouseEvent, QPainter, QPen, QPixmap, QShortcut, QKeySequence
 
 class Defaults:
     blankSize = QSize(300,300);
@@ -17,11 +17,11 @@ class Defaults:
     drawButtonsLabel = "Draw Mode";
 
 class MaskSegmenter(QtWidgets.QWidget):
-    def __init__(self,parent=None):
+    def __init__(self,window,parent=None):
         super().__init__(parent);
-        self.createObjects();
+        self.createObjects(window);
     
-    def createObjects(self):
+    def createObjects(self,window):
         self.editor = EditorPane();
         self.data = DataPane();
 
@@ -32,7 +32,7 @@ class MaskSegmenter(QtWidgets.QWidget):
         self.setLayout(self.layout);
 
         self.ctrl = False;
-        self.shift = False
+        self.shift = False;
 
         self.editor.toolbar.iButtons.imageIncrement.connect(self.data.selector.incrementImage);
         self.data.selector.imageChanged.connect(self.editor.mask.maskContainer.switchImage);
@@ -41,26 +41,42 @@ class MaskSegmenter(QtWidgets.QWidget):
         QShortcut(QKeySequence("right"),self).activated.connect(lambda: self.data.selector.incrementImage(1));
         QShortcut(QKeySequence("up"),self).activated.connect(lambda: self.editor.toolbar.slider.triggerAction(QtWidgets.QAbstractSlider.SliderAction.SliderSingleStepAdd));
         QShortcut(QKeySequence("down"),self).activated.connect(lambda: self.editor.toolbar.slider.triggerAction(QtWidgets.QAbstractSlider.SliderAction.SliderSingleStepSub));
+        
+        window.installEventFilter(self);
+        
 
-    def keyPressEvent(self,ev):
-        super().keyPressEvent(ev);
-        if (Qt.KeyboardModifier.ControlModifier in ev.modifiers()):
-            self.editor.toolbar.drawButtons.setValue(1,store=True);
-            self.ctrl = True;
-            print("control pressed");
-        if (Qt.KeyboardModifier.ShiftModifier in ev.modifiers()):
-            self.editor.toolbar.drawButtons.setValue(0,store=True);
-            self.shift = True;
-            print("shift pressed");
-
-    def keyReleaseEvent(self,ev):
-        if (Qt.KeyboardModifier.ControlModifier not in ev.modifiers() and self.ctrl): 
-            self.editor.toolbar.drawButtons.restoreValue();
-            print("ctrl released")
-        if (Qt.KeyboardModifier.ShiftModifier not in ev.modifiers() and self.shift):
-            self.editor.toolbar.drawButtons.restoreValue();
-            print("shift released")
-
+    def eventFilter(self,obj,ev):
+        if ev.type() == QEvent.Type.KeyPress:
+            if (Qt.KeyboardModifier.ControlModifier in ev.modifiers()):
+                self.editor.toolbar.drawButtons.setValue(1,store=True);
+                self.ctrl = True;
+                print("control pressed");
+                return True;
+            if (Qt.KeyboardModifier.ShiftModifier in ev.modifiers()):
+                self.editor.toolbar.drawButtons.setValue(0,store=True);
+                self.shift = True;
+                print("shift pressed");
+                return True;
+            if (ev.key() == Qt.Key.Key_Space and not ev.isAutoRepeat()):
+                self.editor.toolbar.maskCheck.setChecked(True);
+                print("space pressed");
+                return True;
+        if ev.type() == QEvent.Type.KeyRelease:
+            if (Qt.KeyboardModifier.ControlModifier not in ev.modifiers() and self.ctrl): 
+                self.editor.toolbar.drawButtons.restoreValue();
+                print("ctrl released")
+                return True;
+            if (Qt.KeyboardModifier.ShiftModifier not in ev.modifiers() and self.shift):
+                self.editor.toolbar.drawButtons.restoreValue();
+                print("shift released")
+                return True;
+            if (ev.key() == Qt.Key.Key_Space and not ev.isAutoRepeat()):
+                self.editor.toolbar.maskCheck.setChecked(False);
+                print("space released");
+                return True;
+        return False;
+            
+        
 class EditorPane(QtWidgets.QWidget):
     def __init__(self,parent=None):
         super().__init__(parent);
@@ -474,7 +490,7 @@ class ImageSelectorPane(QtWidgets.QWidget):
 
     def selectImageDir(self): #TODO: should this clear the mask directory?
         print("image dir selected");
-        self.model.setStringList(os.listdir(self.imageDirChooser.dire));
+        self.model.setStringList(os.listdir(self.imageDirChooser.dire)); #TODO: image-file-only validation
         self.list.setCurrentIndex(self.model.index(0));
         self.changeImage();
 
@@ -546,7 +562,7 @@ class DirectorySelector(QtWidgets.QWidget):
 if __name__ == '__main__':
     app = QtWidgets.QApplication(sys.argv)
     window = QtWidgets.QMainWindow();
-    ex = MaskSegmenter(parent=window);
+    ex = MaskSegmenter(window,parent=window);
     window.setCentralWidget(ex);
     window.show();
     app.exec()

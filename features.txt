@@ -2,8 +2,6 @@ convenient keyboard shortcuts
 -up/down for brush size
 -ctrl/shift for add/remove
 -left/right to switch images
---no progress lost if accidentally move left/right?
---alternatively, use tab/ctrl+tab to switch
 -ctrl+Scroll for zoom in/outline
 -space to show/hide mask
 
