@@ -11,6 +11,12 @@ buttons and widgets:
 -some sort of image browser, updates w/ shortcut
 -zoom in/out buttons
 -"revert mask" button - with confirmation window, undoes all working changes and reverts to original 
+-revert to original mask button
+
+mask folders
+-working folder (internal to the program)
+-import masks to folder
+-export masks to other folder
 
 background/foreground color&alpha
 -outline/area mode (more technically challenging)
@@ -42,6 +48,7 @@ Datapane Requirements:
 --possibly ability to save/load this json file as well, storing and loading sessions?
 
 more difficult/advanced features:
+-drag to resize panes
 keyboard shortcut settings / config file
 -might not be super necessary
 fill tool - all contiguous area [of fg/bg]
