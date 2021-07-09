@@ -29,26 +29,23 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.setCentralWidget(self.box)
 
-        self.last_x, self.last_y = None, None
+        self.lastPos = None
 
     def mouseMoveEvent(self, e):
-        if self.last_x is None: # First event.
-            self.last_x = e.x()
-            self.last_y = e.y()
+        if self.lastPos is None: # First event.
+            self.lastPos = e.position();
             return # Ignore the first time.
 
         painter = QtGui.QPainter(self.label.pixmap())
-        painter.drawLine(self.last_x, self.last_y, e.x(), e.y())
+        painter.drawLine(self.lastPos, e.position())
         painter.end()
         self.update()
 
         # Update the origin for next time.
-        self.last_x = e.x()
-        self.last_y = e.y()
+        self.lastPos = e.position();
 
     def mouseReleaseEvent(self, e):
-        self.last_x = None
-        self.last_y = None
+        self.lastPos = None;
 
 
 app = QtWidgets.QApplication(sys.argv)

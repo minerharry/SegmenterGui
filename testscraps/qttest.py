@@ -314,7 +314,7 @@ class NextPrevButtons(QtWidgets.QWidget):
 if __name__ == '__main__':
     app = QtWidgets.QApplication(sys.argv)
     window = QtWidgets.QMainWindow();
-    ex = EditorPane("C:\\Users\\miner\\OneDrive\\Documents\\Python\\SegmenterGui\\nevgon_images",parent=window);
+    ex = EditorPane("C:\\Users\\miner\\OneDrive\\Documents\\Python\\SegmenterGui\\testscraps",parent=window);
     window.setCentralWidget(ex);
     window.show();
     app.exec()
