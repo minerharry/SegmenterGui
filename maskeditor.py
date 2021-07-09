@@ -1034,7 +1034,7 @@ class MaskUnexportedDialog(QDialog):
         self.cancelButton.clicked.connect(self.reject);
 
     def open(self):
-        if (self.unexportedMasks()):
+        if (self.unexportedMasks()): #TODO: this doesn't work on window exit, fix.
             print("before open");
             super().open();
             print("after open");
@@ -1042,7 +1042,7 @@ class MaskUnexportedDialog(QDialog):
             self.accept();
 
     def unexportedMasks(self):
-        return not(os.path.exists(Defaults.exportedFlagFile));
+        return any(os.scandir(Defaults.workingDirectory)) and not(os.path.exists(Defaults.exportedFlagFile));
 
     def exportAndAccept(self):
         self.exportClicked.emit();
