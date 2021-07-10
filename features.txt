@@ -10,6 +10,7 @@ buttons and widgets:
 -brush size slider & number input, updates when shortcut is pressed
 -some sort of image browser, updates w/ shortcut
 -zoom in/out buttons
+-"revert mask" button - with confirmation window, undoes all working changes and reverts to original 
 -revert to original mask button
 
 mask folders
@@ -23,13 +24,28 @@ background/foreground color&alpha
 cache/save-some, save-all
 -navigation should feel smooth and fast (same ideaas the shortcuts)
 --thought: have the images in batches of n (5-10); alway have loaded the current, next, and previous batch
+--probably not needed; keep idea around in case image loading becomes a significant time sink
+
+=
 
 Datapane Requirements:
 -select input image directory
 --image browser? scrollpane: can select specific image with click, and displays current image
 -select mask directory [empty or otherwise]
 --no preview
--possibly: save/load feature where instead of real-time edit, you can save a whole batch of masks?
+-Mask directory works like an import, but still connected to the original directory; 
+--Working mask directory, part of the internal program: all masks saved temporarily, to either be exported or discarded
+--When mask directory changed/added, user is prompted that it will overwrite current files, with options:
+---overwrite masks - working directory is cleared, and the new masks are loaded in
+----[backend is just that working directory is cleared and masks will be pulled from the given directory]
+---load masks but save changes - working directory is left as-is; any unmodified masks prioritize directory
+----backeend: working directory not cleared
+----Should this be allowed? might be simpler not to, since main purpose is modification not creation
+---cancel - does nothing
+
+-Application close/open: when closing, given the option to export as well as to clear working masks
+--json file stored in the working mask directory with the image directory and mask directory so work can resume
+--possibly ability to save/load this json file as well, storing and loading sessions?
 
 more difficult/advanced features:
 -drag to resize panes
