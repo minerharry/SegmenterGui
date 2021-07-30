@@ -166,12 +166,7 @@ class MaskSegmenter(QSplitter,DataObject):
                 self.editor.toolbar.maskCheck.setChecked(False);
                 print("space released");
                 return True;
-        return False;
-
-class WorkingDirManager:
-    def __init__(self,dir=Defaults.workingDir):
-        self.workingDir = dir;
-        
+        return False;       
 
 
 class SessionManager:
