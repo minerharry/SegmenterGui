@@ -34,7 +34,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def draw_circle(self):
         ptr = QtGui.QPainter(self.pmap);
-        ptr.setPen(10);
+        pen = QtGui.QPen(QtGui.QColor(0,0,0,256),1,Qt.PenStyle.DotLine);
+        ptr.setPen(pen);
         ptr.drawEllipse(100,200,300,200);
         ptr.end();
         self.label.setPixmap(self.pmap);
