@@ -8,6 +8,7 @@ numpy = "*"
 pyqt6 = "*"
 python-bioformats = "*"
 scikit-image = "*"
+pyqt6-charts = "*"
 
 [dev-packages]
 

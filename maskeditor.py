@@ -1,3 +1,4 @@
+from posixpath import basename
 from re import S
 from PyQt6 import QtGui
 from PyQt6.QtWidgets import QAbstractItemView, QAbstractSlider, QApplication, QCheckBox, QDialog, QFileDialog, QGraphicsScene, QGraphicsView, QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit, QListView, QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QSlider, QSplitter, QStatusBar, QStyle, QStyleOptionFrame, QToolButton, QVBoxLayout, QWidget
@@ -41,7 +42,9 @@ class Defaults:
     autosaveTime = 60*1000; #milliseconds
     exportedFlagFile = "export.flag";
     attemptMaskResize = True;
-    penPreview = True;
+    penPreview = False;
+    allowMaskCreation = True;
+    defaultMaskFormat = ".bmp";
 
 if Defaults.loadMode == LoadMode.biof:
     import bioformats as bf
@@ -51,7 +54,7 @@ if Defaults.loadMode == LoadMode.biof:
             pass
         bf.init_logger = init_logger
 else:
-    from skimage.io import imread
+    from skimage.io import imread,imsave
 
 
 class DataObject: #basic implementation of object data loading/saving
@@ -140,6 +143,8 @@ class MaskSegmenter(QSplitter,DataObject):
 
         self.sessionManager.error.connect(self.receiveError);
         self.editor.maskView.maskContainer.mask.error.connect(self.receiveError);
+        self.editor.maskView.maskContainer.error.connect(self.receiveError);
+        self.data.selector.error.connect(self.receiveError);
         
         if self.statusBar:
             self.sessionManager.saved.connect(self.statusBar.saveMessage);
@@ -331,10 +336,11 @@ class MaskedImageView(QGraphicsView,DataObject):
         self.scene.setSceneRect(self.proxy.rect());
 
         
-    def updatePreview(self):
+    def updatePreview(self): #TODO: fix ghost lines; #TODO: make visible on all colors w/ black&white
         if self.mousePos:
             pos = self.mapToScene(self.mousePos);
             self.preview.setVisible(True); #-self.proxy.rect().topLeft().x() -self.proxy.rect().topLeft().y()
+            self.preview.prepareGeometryChange();
             self.preview.setRect(pos.x()-self.diameter/2,pos.y()-self.diameter/2,self.diameter,self.diameter)
             #penWidth = 0.5/self.scaleFactor;
             #print(penWidth);
@@ -393,6 +399,7 @@ class DrawMode:
     EXCLUDE = 1;
 
 class MaskContainer(QWidget,DataObject):
+    error = pyqtSignal(str,int)
     sizeChanged = pyqtSignal(QSize);
     imageRanged = pyqtSignal(float,float);
     def __init__(self,parent=None):
@@ -450,11 +457,14 @@ class MaskContainer(QWidget,DataObject):
             bmap = self.readBitmap(mask,rsize=(self.image.size() if Defaults.attemptMaskResize else None));
             print("creating mask from file")
         else:
-            print(f"no file, creating empty mask of size {self.image.pixmap().size()}")
+            self.error.emit("No existing mask found; creating a blank one",20000);
             bmap = QBitmap(self.image.pixmap().size());
             bmap.fill(Defaults.bmapBG);
+            if (Defaults.allowMaskCreation):
+                mask = os.path.splitext(os.path.basename(image))[0]+Defaults.defaultMaskFormat;
         if bmap.size() != self.image.pixmap().size(): #provided mask and image are of different sizes; create new mask
-            print(f"ERROR: Provided mask file incorrect size, creating empty mask of size {self.image.pixmap().size()}")
+            
+            self.error.emit("Existing mask file is of a different size than corresponding image, creating a blank one; enable AttemptMaskResize to automatically resize input masks",20000) #TODO: Make this actually configurable
             bmap = QBitmap(self.image.pixmap().size());
             bmap.fill(Defaults.bmapBG);
         self.mask.loadBitmap(bmap,mask);
@@ -703,10 +713,10 @@ class ImageMask(QLabel,DataObject):
             print(f"attempting save to {self.fileName}");
             saveName = self.fileName;
             names = os.path.splitext(self.fileName);
-            if (names[1].lower() not in QImageWriter.supportedImageFormats()):
+            print(QImageWriter.supportedImageFormats());
+            if (names[1][1:].lower() not in QImageWriter.supportedImageFormats()):
                 print(f"Unsupported save format: {names[1]}, saving to .bmp") #TODO: custom image writing
                 saveName = names[0] + ".bmp";
-            
             self.bitlayer.save(Defaults.workingDirectory+saveName);
             if (os.path.exists(Defaults.exportedFlagFile)):
                 os.remove(Defaults.exportedFlagFile)
@@ -945,6 +955,7 @@ class DataPane(QWidget,DataObject):
         self.exportPane.exportActivated.connect(self.selector.export);
 
 class ImageSelectorPane(QWidget,DataObject):
+    error = pyqtSignal(str,int);
     directoryChanged = pyqtSignal(str,str); #image directory, mask directory
     imageChanged = pyqtSignal(str,str); #image file, mask file
     workingDirCleared = pyqtSignal();
@@ -958,7 +969,7 @@ class ImageSelectorPane(QWidget,DataObject):
             "Warning: You have unsaved masks. \nImporting new masks will overwrite the current changes. \nContinue?",
             buttonNames=["Overwrite Masks","Export Unsaved Masks"]);
         self.imageDirChooser = DirectorySelector("Select Image Directory:");
-        self.maskDirChooser = DirectorySelector(title="Import Masks",dialog=self.importConfirm);
+        self.maskDirChooser = DirectorySelector(title="Import Masks",dialog=self.importConfirm,clearBtn="Clear");
         self.importConfirm.exportClicked.connect(self.export)
         
         self.list = QListView();
@@ -980,28 +991,41 @@ class ImageSelectorPane(QWidget,DataObject):
 
         self.exportDialog = QExportDialog(self);
 
-    @pyqtSlot()
-    def export(self):
+    def export(self,callback=None):
+        print(callback);
         if not(self.imageDirChooser.dire and self.maskDirChooser.dire):
             QMessageBox.information(self,"Unable to export","No mask files to export",QMessageBox.StandardButton.Ok,defaultButton=QMessageBox.StandardButton.Ok);
+            if callback:
+                callback(True);
             return;
         print("gonna grab some file paths");
-        filesToExport = self.getAllMaskFilePaths();
+        filesToExport = self.getAllMaskFilePaths(includeModify=True);
         print(f"paths retrieved: {len(filesToExport)}");
-        output = self.exportDialog.exec([os.path.basename(file) for file in filesToExport]);
-        #print(output);
+        output = self.exportDialog.exec([os.path.basename(file) if isinstance(file,str) else os.path.basename(file[0]) for file in filesToExport]);
         if (output):
             exportDir = self.exportDialog.selectedFiles()[0];
             print(f"window accepted, exporting to: {exportDir}");
             for path in filesToExport:
-                if (exportDir != os.path.dirname(path)):
+                if isinstance(path,tuple):
+                    dest = path[1];
+                    source = path[0];
+                    dest = exportDir+"/"+dest;
+                    print(path);
+                    if Defaults.loadMode == LoadMode.skimage:
+                        imsave(dest,imread(source));
+                    elif Defaults.loadMode == LoadMode.biof: #TODO: TEST BF WITH COMPATIBLE COMPUTER
+                        data = bf.load_image(source);
+                        bf.write_image(dest,data,data.dtype);
+                elif (exportDir != os.path.dirname(path)): 
                     shutil.copy(path,exportDir);
             print("Export successful");
             with open(Defaults.exportedFlagFile,'w') as f:
                 pass;
             print("flag file created");
-        else:
-            print("window rejected");
+            if callback:
+                callback(True);
+        elif callback:
+            callback(False);
 
     @pyqtSlot()
     def revertMask(self):
@@ -1024,7 +1048,7 @@ class ImageSelectorPane(QWidget,DataObject):
 
 
 
-    def getAllMaskFilePaths(self): #should only be called if both mask and image directory selected
+    def getAllMaskFilePaths(self,includeModify=False): #should only be called if both mask and image directory selected
         if not(self.imageDirChooser.dire and self.maskDirChooser.dire):
             print("Warning: attempting to get file paths without without proper directories");
             return [];
@@ -1038,17 +1062,24 @@ class ImageSelectorPane(QWidget,DataObject):
         for im in imagenames:
             base = os.path.splitext(im)[0];
             working = list(filter(lambda x: x.startswith(base+"."),workingMasks));
-            if len(working) > 0:
+            original = list(filter(lambda x:x.startswith(base+"."),originalMasks));
+            if len(working) > 0 and len(original) > 0:
+                maskExt = os.path.splitext(working[0])[1]; imageext = os.path.splitext(original[0])[1];
+                if maskExt == imageext or not includeModify:
+                    result.append(Defaults.workingDirectory + working[0]);
+                else:
+                    result.append((Defaults.workingDirectory + working[0],original[0]));
+            elif len(working) > 0:
                 result.append(Defaults.workingDirectory + working[0]);
-            else:
-                original = list(filter(lambda x:x.startswith(base+"."),originalMasks));
-                if len(original) > 0:
-                    result.append(self.maskDirChooser.dire + "\\" + original[0]);
+            elif len(original) > 0:
+                result.append(self.maskDirChooser.dire + "\\" + original[0]);
+            
         return result;
 
     def selectImageDir(self,dire,clear=True,emit=True,change=True): #TODO: fix image not reloading correctly
         if dire and not(os.path.exists(dire)):
             print(f"Error: somehow attempting to select invalid image directory {dire}; setting to None")
+            self.error.emit(f"Invalid image directory: {dire}",20000)
             dire=None;
         print(f"image dir selected: {dire}");
         if dire and dire != '':
@@ -1059,7 +1090,7 @@ class ImageSelectorPane(QWidget,DataObject):
             self.model.setStringList([]);
         self.list.setCurrentIndex(self.model.index(0));
         #print(self.list.currentIndex().row());
-        if clear: self.maskDirChooser.setDirectory(None);
+        if clear: self.maskDirChooser.clearSelection();
         if change: self.changeImage();
         if emit: self.directoryChanged.emit(dire,None);
 
@@ -1134,7 +1165,9 @@ class ImageSelectorPane(QWidget,DataObject):
             self.selectMaskDir(data['mask_dir'],clear=False,emit=False,change=False);
             self.imageDirChooser.setDirectory(data['image_dir'],emit=False);
             self.selectImageDir(data['image_dir'],clear=False,emit=False,change=False)
-            self.list.setCurrentIndex(self.model.index(data['row']));
+            index = self.model.index(data['row'])
+            self.list.setCurrentIndex(index);
+            self.list.scrollTo(index,QAbstractItemView.ScrollHint.PositionAtTop);
         except:
             print("load error: there was an error loading data for the imageselectorpane");
             pass;
@@ -1143,15 +1176,17 @@ class ImageSelectorPane(QWidget,DataObject):
 class DirectorySelector(QWidget):
     directoryChanged = pyqtSignal(str);
     
-    def __init__(self,title="Select Directory:",startingDirectory=None,parent=None,buttonText="Browse...",dialog=None):
+    def __init__(self,title="Select Directory:",startingDirectory=None,parent=None,buttonText="Browse...",dialog=None,clearBtn = ""):
         super().__init__(parent=parent);
-        self.createObjects(title,startingDirectory,dialog,buttonText);
+        self.createObjects(title,startingDirectory,dialog,buttonText,clearBtn);
+
     
-    def createObjects(self,title,dire,dialog,buttonText):
+    
+    def createObjects(self,title,dire,dialog,buttonText,clearBtn):
         self.dire = dire;
         self.dialog = dialog;
         if self.dialog:
-            self.dialog.accepted.connect(self.selectDirectory);
+            self.dialog.accepted.connect(self.handleCheckCallback);
         self.title = QLabel(title);
         self.browseButton = QPushButton(buttonText);
         self.browseButton.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Fixed,QSizePolicy.Policy.Fixed))
@@ -1159,7 +1194,12 @@ class DirectorySelector(QWidget):
         self.layout = QGridLayout();
         self.layout.addWidget(self.title,0,0);
         self.layout.addWidget(self.browseButton,0,1);
-        self.layout.addWidget(self.pathLabel,1,0,1,2);
+        if clearBtn:
+            self.clearButton = QPushButton(clearBtn);
+            self.clearButton.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Fixed,QSizePolicy.Policy.Fixed));
+            self.clearButton.clicked.connect(lambda: self.checkDialog(self.clearSelection));
+            self.layout.addWidget(self.clearButton,0,2);
+        self.layout.addWidget(self.pathLabel,1,0,1,-1);
 
         self.fileDialog = QFileDialog(self);
         self.fileDialog.setFileMode(QFileDialog.FileMode.Directory);
@@ -1168,19 +1208,24 @@ class DirectorySelector(QWidget):
         self.setLayout(self.layout)
         self.directoryChanged.connect(self.pathLabel.setText);
         self.directoryChanged.connect(self.pathLabel.setToolTip);
-        self.browseButton.clicked.connect(self.checkDialog);
+        self.browseButton.clicked.connect(lambda: self.checkDialog(self.selectDirectory));
 
 
 
     @pyqtSlot()
-    def checkDialog(self):
+    def checkDialog(self,func):
+        self.checkCallBack = func;
         print("dialog checked");
         if self.dialog:
             print("dialog opened");
             self.dialog.open();
         else:
             print("no dialog, selecting directory");
-            self.selectDirectory();
+            self.handleCheckCallback();
+
+    @pyqtSlot()
+    def handleCheckCallback(self):
+        self.checkCallBack();
 
     @pyqtSlot()
     def selectDirectory(self):
@@ -1191,9 +1236,11 @@ class DirectorySelector(QWidget):
         else:
             self.setFocus();
         
-        
+    def clearSelection(self,emit=True):
+        self.setDirectory(None,emit=emit);
     
     def setDirectory(self,dire,emit=True):
+        print(emit);
         if dire and not(os.path.exists(dire)):
             print(f"Error: attempting to set invalid directory {dire}; setting to none");
             dire=None;
@@ -1201,6 +1248,7 @@ class DirectorySelector(QWidget):
         self.dire = dire;
         self.fileDialog.setDirectory(self.dire if self.dire else "");
         if emit:
+            print("mask dir change emitted")
             self.directoryChanged.emit(self.dire);
         else:
             self.pathLabel.setText(self.dire);
@@ -1208,7 +1256,7 @@ class DirectorySelector(QWidget):
 
 
 class MaskUnexportedDialog(QDialog):
-    exportClicked = pyqtSignal()
+    exportClicked = pyqtSignal(object)#function
     
     def __init__(self,desc,buttonNames=["Exit, don't export","Export and exit"]):
         super().__init__();
@@ -1257,8 +1305,15 @@ class MaskUnexportedDialog(QDialog):
         
 
     def exportAndAccept(self):
-        self.exportClicked.emit();
-        self.accept();
+        self.exportClicked.emit(self.exportResult);
+    
+    def exportResult(self,result):
+        if result:
+            print("accepted")
+            self.accept();
+        else:
+            print("rejected")
+            self.reject();
 
 
 
@@ -1299,7 +1354,7 @@ class ElideLabel(QLabel):
         except:
             m = self.fontMetrics().width('x') / 2 - margin
         r = self.contentsRect().adjusted(
-            margin + m,  margin, -(margin + m), -margin)
+            int(margin + m),  int(margin), int(-(margin + m)), int(-margin));
         qp.drawText(r, self.alignment(), 
             self.fontMetrics().elidedText(
                 self.text(), self.elideMode(), r.width()))
@@ -1473,15 +1528,17 @@ class QExportDialog(QFileDialog):
         return super().exec();
 
     def accept(self):
-        print("accept method called");
-        overlaps = len(set(self.names) & set(os.listdir(self.selectedFiles()[0])));
-        if (overlaps > 0):
-            print("there be overlaps")
-            self.text.setText(f"Warning: {overlaps} files will be overwritten. Proceed?")
-            if (self.dialog.exec()):
-                return super().accept();
+        if (len(self.selectedFiles()) and os.path.exists(self.selectedFiles()[0])):
+            overlaps = len(set(self.names) & set(os.listdir(self.selectedFiles()[0])));
+            if (overlaps > 0):
+                print("there be overlaps")
+                self.text.setText(f"Warning: {overlaps} files will be overwritten. Proceed?")
+                if (self.dialog.exec()):
+                    return super().accept(); #valid and prompting was accepted
+            else:
+                return super().accept(); #valid and no further prompting to be done
         else:
-            return super().accept();
+            return super().accept(); #invalid; should be handled by super's accept method
             
 
 class ExportPanel(QWidget):

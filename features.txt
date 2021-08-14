@@ -39,13 +39,21 @@ Datapane Requirements:
 ---overwrite masks - working directory is cleared, and the new masks are loaded in
 ----[backend is just that working directory is cleared and masks will be pulled from the given directory]
 ---load masks but save changes - working directory is left as-is; any unmodified masks prioritize directory
-----backeend: working directory not cleared
+----backend: working directory not cleared
 ----Should this be allowed? might be simpler not to, since main purpose is modification not creation
 ---cancel - does nothing
 
 -Application close/open: when closing, given the option to export as well as to clear working masks
 --json file stored in the working mask directory with the image directory and mask directory so work can resume
 --possibly ability to save/load this json file as well, storing and loading sessions?
+
+--brightness adjust - show user a histogram to allow for informed clamping
+--export- change file format
+--creation of new masks; allow for original-less mask saving
+
+----comparison of some existing segmenters
+----quantification of segmenter accuracy 
+
 
 more difficult/advanced features:
 -drag to resize panes
