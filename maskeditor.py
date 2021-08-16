@@ -1,9 +1,10 @@
 from posixpath import basename
 from re import S
 from PyQt6 import QtGui
+from PyQt6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 from PyQt6.QtWidgets import QAbstractItemView, QAbstractSlider, QApplication, QCheckBox, QDialog, QFileDialog, QGraphicsScene, QGraphicsView, QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit, QListView, QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QSlider, QSplitter, QStatusBar, QStyle, QStyleOptionFrame, QToolButton, QVBoxLayout, QWidget
 from PyQt6 import QtCore
-from PyQt6.QtCore import QFile, QLineF, QPoint, QPointF, QSignalMapper, QSize, QStringListModel, QTimer, Qt, pyqtSignal, pyqtSlot, QObject, QEvent
+from PyQt6.QtCore import QFile, QLineF, QMarginsF, QPoint, QPointF, QRect, QRectF, QSignalMapper, QSize, QStringListModel, QTimer, Qt, pyqtSignal, pyqtSlot, QObject, QEvent
 from PyQt6.QtGui import QAction, QBitmap, QBrush, QCloseEvent, QColor, QDoubleValidator, QFontMetrics, QIcon, QImage, QImageWriter, QIntValidator, QMouseEvent, QPainter, QPen, QPixmap, QShortcut, QKeySequence, QTextDocument, QTransform, QUndoCommand, QUndoStack
 import numpy as np
 
@@ -15,6 +16,8 @@ import inspect
 
 from skimage.transform import resize
 from skimage.exposure import rescale_intensity
+
+from rangeslider6 import QRangeSlider
 
 class LoadMode:
     biof = 0;
@@ -1365,7 +1368,6 @@ class AdjustmentDialog(QDialog,DataObject):
     persistentChanged = pyqtSignal(bool);
     rangeReset = pyqtSignal();
 
-
     def __init__(self,parent=None):
         super().__init__(parent);
         self.createObjects();
@@ -1374,6 +1376,7 @@ class AdjustmentDialog(QDialog,DataObject):
         self.setWindowTitle("Adjust Image Brightness / Contrast");
         self.tempState = None;
         self.layout = QGridLayout(self);
+        self.histogram = HistogramAdjustWidget();
         self.range = EditableRange();
         self.persistenceCheck = QCheckBox("Use for all images");
         self.resetButton = QPushButton("Reset to default");
@@ -1381,19 +1384,21 @@ class AdjustmentDialog(QDialog,DataObject):
         self.previewButton = QPushButton("Preview");
         self.cancelButton = QPushButton("Cancel");
     
-        self.layout.addWidget(self.range,0,0,1,6);
-        self.layout.addWidget(self.persistenceCheck,1,0,1,3);
-        self.layout.addWidget(self.resetButton,1,3,1,3);
-        self.layout.addWidget(self.confirmButton,2,0,1,2);
-        self.layout.addWidget(self.previewButton,2,2,1,2);
-        self.layout.addWidget(self.cancelButton,2,4,1,2);
+        self.layout.addWidget(self.histogram,0,0,1,-1);
+        self.layout.addWidget(self.range,1,0,1,-1);
+        self.layout.addWidget(self.persistenceCheck,2,0,1,3);
+        self.layout.addWidget(self.resetButton,2,3,1,3);
+        self.layout.addWidget(self.confirmButton,3,0,1,2);
+        self.layout.addWidget(self.previewButton,3,2,1,2);
+        self.layout.addWidget(self.cancelButton,3,4,1,2);
         self.setLayout(self.layout)
 
         self.confirmButton.setDefault(True);
         self.resetButton.clicked.connect(self.reset);
         self.confirmButton.clicked.connect(self.accept);
         self.cancelButton.clicked.connect(self.reject);
-        self.previewButton.clicked.connect(self.apply)
+        self.previewButton.clicked.connect(self.apply);
+        self.range.rangeChanged.connect(lambda range: self.histogram.setRange(range,False));
         # self.range.rangeChanged.connect(self.pixelRangeChanged.emit); #done through apply
         # self.persistenceCheck.toggled.connect(self.persistentChanged.emit);
         
@@ -1442,6 +1447,7 @@ class AdjustmentDialog(QDialog,DataObject):
     def setPixelRange(self,min,max):
         if (not(self.persistent())):
             self.range.setRange(min,max);
+            self.histogram.setRange(min,max);
 
     @pyqtSlot()
     def imageChanged(self):
@@ -1455,6 +1461,101 @@ class AdjustmentDialog(QDialog,DataObject):
 
     def getSaveData(self):
         return self.persistent();
+
+class HistogramAdjustWidget(QWidget):
+
+    def __init__(self):
+        super().__init__();
+        self.createObjects();
+
+    def loadHistogram(self,data): #raw image pixel data
+        self.line.clear();
+        hist,bins = np.histogram(data,100);
+        for x,y in zip(bins,hist):
+            self.line.append(QPointF(x,y));
+        hmin = np.min(hist);
+        hmax = np.max(hist);
+
+        self.xAxis.setRange(np.min(bins),np.max(bins));
+        self.yAxis.setRange(hmin,hmax);
+
+        self.slider.setMin(hmin);
+        self.slider.setMax(hmax);
+
+    def setRange(self,min,max,emit=True):
+        self.slider.setRange(min,max,emit);
+
+    def createObjects(self):
+        self.chart = QChart();
+        self.line = QLineSeries(self.chart);
+        self.line.setName("Image Intensity");
+
+        self.chart.addSeries(self.line);
+        self.chart.setTitle("Image Pixel Intensity Histogram");
+        self.chart.legend().hide();
+        
+        self.xAxis = QValueAxis();
+        self.xAxis.setTitleText("Intensity");
+
+        self.yAxis = QValueAxis();
+        self.yAxis.setTitleText("Frequency");
+        self.yAxis.setLabelsVisible(False)
+
+        self.chart.addAxis(self.xAxis,Qt.AlignmentFlag.AlignBottom);
+        self.chart.addAxis(self.yAxis,Qt.AlignmentFlag.AlignLeft);
+
+        self.line.attachAxis(self.xAxis);
+        self.line.attachAxis(self.yAxis);
+
+        self.slider = QRangeSlider();
+        self.view = SliderChartView(self.chart,self.slider);
+        self.layout = QVBoxLayout();
+        self.layout.addWidget(self.view);
+        self.setLayout(self.layout);
+
+    def resizeEvent(self, a0) -> None:
+        print(self.chart.rect());
+        print(self.chart.plotArea());
+        return super().resizeEvent(a0)
+
+
+class SliderChartView(QChartView):
+    def __init__(self,chart,slider:QRangeSlider,sliderHeight=None):
+        super().__init__(chart);
+        self.slider = slider;
+        self.slider.startValueChanged.connect(self.updateGraphClip)
+        self.slider.endValueChanged.connect(self.updateGraphClip)
+        self.scene().addWidget(self.slider);
+        self.leftRect = self.scene().addRect(QRectF(),QColor(0,0,0,128),QColor(0,0,0,128));
+        self.rightRect = self.scene().addRect(QRectF(),QColor(0,0,0,128),QColor(0,0,0,128));
+        if sliderHeight == None:
+            self.sliderHeight = self.slider.rect().height();
+        else:
+            self.sliderHeight = sliderHeight;
+        self.setMinimumSize(500,300);
+
+    
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.chart().resize(self.chart().size().shrunkBy(QMarginsF(0,0,0,self.sliderHeight)))
+        plotArea = self.chart().plotArea();
+        self.slider.setGeometry(QRect(plotArea.left(),self.chart().rect().bottom(),plotArea.width(),self.sliderHeight));
+        print(self.slider.head.geometry());
+        print(self.slider.tail.geometry());
+        self.updateGraphClip();
+
+    def updateGraphClip(self):
+        plotArea:QRectF = self.chart().plotArea();
+        range = self.slider.max()-self.slider.min()
+        leftProportion = (self.slider.start()-self.slider.min())/(range);
+        rightProportion = (self.slider.end()-self.slider.min())/(range);
+        leftPos = leftProportion * plotArea.width() + plotArea.left();
+        rightPos = rightProportion * plotArea.width() + plotArea.left();
+
+        leftRect = QRectF(plotArea.topLeft(),QPointF(leftPos,plotArea.bottom()));
+        rightRect = QRectF(QPointF(rightPos,plotArea.top()),plotArea.bottomRight());
+        self.leftRect.setRect(leftRect);
+        self.rightRect.setRect(rightRect);
 
         
 class EditableRange(QWidget,DataObject):#TODO: Fix rangeslider implementation, add an EditableRangeSlider class
