@@ -39,7 +39,9 @@ QRangeSlider > QSplitter::handle:pressed {
 def scale(val, src, dst):
     return (((val - src[0]) / float(src[1]-src[0])) * (dst[1]-dst[0]) + dst[0])
 
-
+class QSmoothSplitter(QtWidgets.QSplitter):
+    def glah(self):
+        self.d
 class Ui_Form(object):
     def setupUi(self, Form):
         Form.setObjectName("QRangeSlider")
@@ -49,7 +51,7 @@ class Ui_Form(object):
         self.gridLayout.setContentsMargins(0, 0, 0, 0)
         self.gridLayout.setSpacing(0)
         self.gridLayout.setObjectName("gridLayout")
-        self._splitter = QtWidgets.QSplitter(Form)
+        self._splitter = QtWidgets.QSmoothSplitter(Form)
         self._splitter.setMinimumSize(QtCore.QSize(0, 0))
         self._splitter.setMaximumSize(QtCore.QSize(16777215, 16777215))
         self._splitter.setOrientation(QtCore.Qt.Orientation.Horizontal)
@@ -190,6 +192,7 @@ class QRangeSlider(QtWidgets.QWidget, Ui_Form):
         self.setStart(0)
         self.setEnd(1)
         self.setDrawValues(True)
+
 
     def min(self):
         return getattr(self, '__min', None)

@@ -1,5 +1,5 @@
 from PyQt6.QtGui import QBrush, QColor
-from testscraps.rangeslider6 import QRangeSlider
+from ..rangesliderside import RangeSlider
 from PyQt6.QtCore import QMarginsF, QPoint, QRect
 from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtWidgets import *
@@ -42,7 +42,7 @@ class ChartWidget(QWidget):
 
         line.attachAxis(xAxis);
         line.attachAxis(yAxis);
-        slider = QRangeSlider();
+        slider = RangeSlider();
 
         self.view = SliderChartView(self.chart,slider);
         self.layout = QVBoxLayout();
@@ -57,11 +57,10 @@ class ChartWidget(QWidget):
         return super().resizeEvent(a0)
 
 class SliderChartView(QChartView):
-    def __init__(self,chart,slider:QRangeSlider,sliderHeight=None):
+    def __init__(self,chart,slider:RangeSlider,sliderHeight=None):
         super().__init__(chart);
         self.slider = slider;
-        self.slider.startValueChanged.connect(self.updateGraphClip)
-        self.slider.endValueChanged.connect(self.updateGraphClip)
+        self.slider.rangeChanged.connect(self.updateGraphClip)
         self.scene().addWidget(self.slider);
         self.leftRect = self.scene().addRect(QRectF(),QColor(0,0,0,128),QColor(0,0,0,128));
         self.rightRect = self.scene().addRect(QRectF(),QColor(0,0,0,128),QColor(0,0,0,128));
@@ -77,8 +76,6 @@ class SliderChartView(QChartView):
         self.chart().resize(self.chart().size().shrunkBy(QMarginsF(0,0,0,self.sliderHeight)))
         plotArea = self.chart().plotArea();
         self.slider.setGeometry(QRect(plotArea.left(),self.chart().rect().bottom(),plotArea.width(),self.sliderHeight));
-        print(self.slider.head.geometry());
-        print(self.slider.tail.geometry());
         self.updateGraphClip();
 
     def updateGraphClip(self):
