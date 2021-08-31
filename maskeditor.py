@@ -51,6 +51,8 @@ class Defaults:
     histSliderPrecision = 100000
     convertUnassignedMasks = True; #whether to convert masks with no equivalent in the mask source directory to some standard type, and prompt the user of that type
     createEmptyMasksForExport = False;
+    adjustForcePreview = False;
+
 
 
 def getTypes(dic:dict,types:set=set()):
@@ -76,6 +78,7 @@ else:
 
 
 class DataObject: #basic implementation of object data loading/saving
+
     def loadState(self,data,**kwargs):
         if data == {}:
             return;
@@ -85,10 +88,11 @@ class DataObject: #basic implementation of object data loading/saving
                 if isinstance(child,DataObject):
                     child.loadState(datum);
                 else:
-                    print(f"Data state load error: named child {name} not an instance of DataObject")
+                    print(f"Data state load error: named child {name} not an instance of DataObject");
             else:
                 print(f"Data state load error: named child {name} not part of class {self}");
         self.loadData(data['self'],**kwargs);
+        
 
     def loadData(self,data): #loads data for self; can be left blank if no data for that class
         pass;
@@ -161,8 +165,9 @@ class MaskSegmenter(QSplitter,DataObject):
         self.shift = False;
 
         self.editor.toolbar.iButtons.increment.connect(self.data.selector.incrementImage);
-        self.data.selector.imageChanged.connect(self.editor.maskView.maskContainer.switchImage);
+        self.data.selector.prepImageChange.connect(self.editor.maskView.maskContainer.prepSwitchImage);
         self.data.selector.imageChanged.connect(self.editor.toolbar.adjustDialog.imageChanged);
+        self.data.selector.imageChanged.connect(self.editor.maskView.maskContainer.switchImage);
         self.editor.toolbar.maskRevert.connect(self.data.selector.revertMask);
         self.data.selector.directoryChanged.connect(self.editor.toolbar.adjustDialog.reset);
         self.data.selector.directoryChanged.connect(self.editor.maskView.fitImageInView);
@@ -214,10 +219,10 @@ class MaskSegmenter(QSplitter,DataObject):
                 self.editor.maskView.cursorUpdate.connect(self.statusBar.showCursorPos);
             self.data.selector.exportTriggered.connect(lambda:self.statusBar.showMessage("Exporting..."));
             self.data.selector.exportCanceled.connect(lambda: self.statusBar.showMessage("Export Canceled",15000))
-            self.data.selector.exportEnd.connect(lambda: self.statusBar.showMessage("Export Successful",15000))
+            self.data.selector.exportEnd.connect(lambda: self.statusBar.showMessage("Export Successful",10000))
             self.data.selector.imLoadTriggered.connect(lambda:self.statusBar.showMessage("Loading Image/Mask..."));
             self.data.selector.imLoadCanceled.connect(lambda: self.statusBar.showMessage("Image/Mask Loading Failed",15000))
-            self.data.selector.imLoadEnd.connect(lambda: self.statusBar.showMessage("Image/Mask Successfully Loaded",15000))
+            self.data.selector.imLoadEnd.connect(lambda: self.statusBar.showMessage("Image/Mask Successfully Loaded",10000))
             self.editor.maskView.maskContainer.rescaleTriggered.connect(lambda:self.statusBar.showMessage("Rescaling Image Intensity..."));
             self.editor.maskView.maskContainer.rescaleCanceled.connect(lambda: self.statusBar.showMessage("Image Intensity Rescale Failed",15000))
             self.editor.maskView.maskContainer.rescaleEnd.connect(lambda: self.statusBar.showMessage("Image Intensity Rescaled Successfully",15000))
@@ -392,6 +397,7 @@ class EditorPane(QWidget,DataObject):
         self.toolbar.zButtons.zoomed.connect(self.maskView.zoom);
         self.toolbar.adjustDialog.pixelRangeChanged.connect(self.maskView.maskContainer.setOverrideRescale);
         self.toolbar.adjustDialog.rangeReset.connect(self.maskView.maskContainer.resetOverride);
+        self.toolbar.zoomReset.clicked.connect(self.maskView.fitImageInView);
         self.maskView.maskContainer.imageRanged.connect(self.toolbar.adjustDialog.setPixelRange);
         self.maskView.maskContainer.imageDataRead.connect(self.toolbar.adjustDialog.loadImageData);
 
@@ -406,6 +412,7 @@ class MaskedImageView(QGraphicsView,DataObject):
 
     def fitImageInView(self):
         self.fitInView(self.proxy,Qt.AspectRatioMode.KeepAspectRatio);
+        self.scaleFactor = 1;
 
     def createObjects(self):
         self.scene = QGraphicsScene();
@@ -488,7 +495,8 @@ class MaskedImageView(QGraphicsView,DataObject):
 
     @pyqtSlot(float)
     def zoom(self,factor,anchor=None):
-        self.scaleFactor*=factor;
+        newFactor = self.scaleFactor*factor;
+        self.scaleFactor = newFactor
         if (anchor):
             anch = self.transformationAnchor();
             self.setTransformationAnchor(anchor);
@@ -496,12 +504,6 @@ class MaskedImageView(QGraphicsView,DataObject):
             self.setTransformationAnchor(anch);
         else:
             self.scale(factor,factor);
-        self.zoomChanged.emit(self.scaleFactor);
-
-    @pyqtSlot(float)
-    def setZoom(self,newScale):
-        self.setTransform(QTransform.fromScale(newScale/self.scaleFactor,newScale/self.scaleFactor),combine=True)
-        self.scaleFactor = newScale;
         self.zoomChanged.emit(self.scaleFactor);
 
 class DrawMode:
@@ -543,6 +545,9 @@ class MaskContainer(QWidget,DataObject):
 
     def sizeHint(self) -> QSize:
         return self.mask.sizeHint();
+
+    def prepSwitchImage(self):
+        self.imData = None;
 
     #switches to a specific image, and loads mask if provided
     #both image and mask are filenames
@@ -607,6 +612,8 @@ class MaskContainer(QWidget,DataObject):
             self.imageRanged.emit(*self.imRange);
         self.imageDataRead.emit(self.imData);
         return self.rescaleAndPixmapData(external=False);
+        # else:
+        #     return QPixmap(self.imData.shape[1],self.imData.shape[0]);
 
     def rescaleAndPixmapData(self,external=True):
         print("rescaling")
@@ -622,7 +629,7 @@ class MaskContainer(QWidget,DataObject):
             type = np.uint8;
         if external:
             self.rescaleStart.emit();
-        print("rescale:",self.overrideRescale) #TODO: Fix double rescale on adjust dialog preview and then unchanged confirm
+        print("rescale:",self.overrideRescale)
         if self.overrideRescale:
             data = rescale_intensity(self.imData,self.overrideRescale,type);
         else:
@@ -632,10 +639,11 @@ class MaskContainer(QWidget,DataObject):
             self.rescaleEnd.emit();
         return out_pix;
 
-    
-    @pyqtSlot(float,float)
     def setOverrideRescale(self,min,max):
-        self.overrideRescale = (min,max);
+        if min is not None and max is not None:
+            self.overrideRescale = (min,max);
+        else:
+            self.overrideRescale = None;
         if self.imData is not None:
             self.image.setPixmap(self.rescaleAndPixmapData());
         
@@ -856,7 +864,6 @@ class ImageMask(QLabel,DataObject):
 
 
 class MaskToolbar(QWidget,DataObject): #TODO: Fix second slider handle seeming to jump all the way left after mask revert
-    #TODO: investigate "slider range set, emitting" on cancel
     maskRevert = pyqtSignal();
 
     def __init__(self,parent=None):
@@ -874,6 +881,7 @@ class MaskToolbar(QWidget,DataObject): #TODO: Fix second slider handle seeming t
         self.maskCheck = QCheckBox("Hide Mask");
         self.iButtons = NextPrevButtons();
         self.zButtons = ZoomButtons()
+        self.zoomReset = QPushButton("Reset\nZoom");
         self.adjustButton = QPushButton("Adjust\nBrightness")
         self.adjustDialog = AdjustmentDialog();
         self.adjustButton.clicked.connect(self.adjustDialog.exec);
@@ -885,6 +893,7 @@ class MaskToolbar(QWidget,DataObject): #TODO: Fix second slider handle seeming t
         self.layout.addWidget(self.maskCheck);
         self.layout.addWidget(self.iButtons);
         self.layout.addWidget(self.zButtons);
+        self.layout.addWidget(self.zoomReset);
         self.layout.addWidget(self.adjustButton);
         self.layout.addWidget(self.revertButton);
         self.layout.insertStretch(-1,1);
@@ -933,7 +942,6 @@ class EditableSlider(QWidget,DataObject): #TODO: Make maximum brush size not lim
 
     @pyqtSlot(int) #assumes a validated value; sets both components
     def setValue(self,value):
-        print(f"setting value: {value}")
         self.slider.setValue(value);
         self.editor.setText(str(value));
         self.valueChanged.emit(value);
@@ -1091,6 +1099,7 @@ class DataPane(QWidget,DataObject):
 class ImageSelectorPane(QWidget,DataObject):
     error = pyqtSignal(str,int,str);
     directoryChanged = pyqtSignal(str,str); #image directory, mask directory
+    prepImageChange = pyqtSignal();
     imageChanged = pyqtSignal(str,str); #image file, mask file
     workingDirCleared = pyqtSignal();
     exportTriggered = pyqtSignal();
@@ -1290,6 +1299,7 @@ class ImageSelectorPane(QWidget,DataObject):
         if self.imageDirChooser.dire and self.imageDirChooser.dire != '':
             if len(self.model.stringList()) <= 0: #directory has no images
                 print("Empty image directory, prematurely emitted")
+                self.prepImageChange.emit();
                 self.imageChanged.emit(None,None);
                 return;
             imName = self.getSelectedImageName(row)
@@ -1315,6 +1325,7 @@ class ImageSelectorPane(QWidget,DataObject):
                     maskPath = (Defaults.workingDirectory+maskName);
             self.imLoadStart.emit()
             self.repaint();
+            self.prepImageChange.emit();
             self.imageChanged.emit(imagePath,maskPath);
             self.imLoadEnd.emit()
 
@@ -1324,7 +1335,6 @@ class ImageSelectorPane(QWidget,DataObject):
     def selectImage(self,index):
         print("image selected")
         self.list.setCurrentIndex(self.model.index(index));
-        self.changeImage(index);
 
     @pyqtSlot(int)
     def incrementImage(self,inc):
@@ -1540,10 +1550,13 @@ class RangeComponent:
 
     def getRange(self):
         pass;
+
 RangeComponent.rangeChanged = pyqtSignal(float,float,RangeComponent)
 
+
 class AdjustmentDialog(QDialog,DataObject): #TODO: Make it clear that pixel intensity goes from 0 to 1
-    pixelRangeChanged = pyqtSignal(float,float)
+    #TODO: make it clear that/when changes are 'unsaved' and that canceling will revert
+    pixelRangeChanged = pyqtSignal(object,object) #float,float *or* nonetype
     persistentChanged = pyqtSignal(bool);
     rangeReset = pyqtSignal();
 
@@ -1566,6 +1579,7 @@ class AdjustmentDialog(QDialog,DataObject): #TODO: Make it clear that pixel inte
         self.cancelButton = QPushButton("Cancel");
 
         self.applied = False #specifically for opening and closing the dialog, nothing else
+        self.dataChangedSinceApply = False
     
         self.layout.addWidget(self.histogram,0,0,1,-1);
         self.layout.addWidget(self.range,1,0,1,-1);
@@ -1576,21 +1590,31 @@ class AdjustmentDialog(QDialog,DataObject): #TODO: Make it clear that pixel inte
         self.layout.addWidget(self.cancelButton,3,4,1,2);
         self.setLayout(self.layout)
 
+        self.originalRange = None;
+        self.initialized = False;
+
         self.confirmButton.setDefault(True);
         self.resetButton.clicked.connect(self.reset);
         self.confirmButton.clicked.connect(self.accept);
         self.cancelButton.clicked.connect(self.reject);
-        self.previewButton.clicked.connect(self.apply);
-        self.range.rangeChanged.connect(self._setPixelRange);
-        self.histogram.rangeChanged.connect(self._setPixelRange);
+        self.previewButton.clicked.connect(self.preview);
 
         self.rangeComponents = [self.range,self.histogram];
+        [component.rangeChanged.connect(self._setPixelRange) for component in self.rangeComponents];
+
     def loadImageData(self,data):
-        self.histogram.loadHistogram(data);
+        self.histogram.loadHistogram(data,self.originalRange);
 
     def accept(self):
-        self.apply();
+        print(f"extra apply needed: {self.dataChangedSinceApply}")
+        if self.dataChangedSinceApply:
+            self.apply();
         return super().accept();
+
+    def preview(self):
+        print(f"extra apply needed: {self.dataChangedSinceApply}")
+        if self.dataChangedSinceApply or Defaults.adjustForcePreview:
+            self.apply();
 
     def reject(self):
         self.revertState();
@@ -1608,12 +1632,16 @@ class AdjustmentDialog(QDialog,DataObject): #TODO: Make it clear that pixel inte
         self.apply();
         self.saveState();
 
-    def apply(self): #Emit signals to update image; until this is called, no changes propogate outwards
+    def apply(self,useRange=True): #Emit signals to update image; until this is called, no changes propogate outwards
         print("applying");
         self.applied = True;
+        self.dataChangedSinceApply = False;
         pers = self.persistent();
         self.persistentChanged.emit(pers);
-        self.pixelRangeChanged.emit(*self.pixelRange());
+        if useRange:
+            self.pixelRangeChanged.emit(*self.pixelRange());
+        else:
+            self.pixelRangeChanged.emit(None,None);
 
     def saveState(self):
         self.tempState = self.getStateData();
@@ -1630,24 +1658,27 @@ class AdjustmentDialog(QDialog,DataObject): #TODO: Make it clear that pixel inte
 
     def pixelRange(self):
         return self.range.range();
-    
-    @pyqtSlot(float,float)
+
     def setPixelRange(self,min,max): #only called by externals
+        self.originalRange = (min,max);
         if (not(self.persistent())):
-            self._setPixelRange(min,max,);
+            self._setPixelRange(min,max);
 
     def _setPixelRange(self,min,max,source=None): #only called internally, never emits
+        self.dataChangedSinceApply = True;
+        print("setting internal pixel range")
         for component in self.rangeComponents:
             if component != source:
                 component.setRange(min,max);
 
     @pyqtSlot()
     def imageChanged(self):
-        print(f"image changed received; persistent: {self.persistent()}")
-        if (not(self.persistent())):
-            self.apply();
+        print(f"image changed received; persistent: {self.persistent()}, initialized: {self.initialized}")
+        if self.initialized:
+            self.apply(useRange=self.persistent())
 
     def loadData(self, data, apply=True):
+        self.initialized = True;
         if data:
             self.setPersistent(data);
         if apply:
@@ -1667,7 +1698,11 @@ class HistogramAdjustWidget(QWidget,DataObject,RangeComponent):
         hist,bins = np.histogram(data,100);
         for x,y in zip(bins,hist):
             self.line.append(QPointF(x,y));
-            
+        if range is None:
+            print("Warning: no range provided to histogram, recalculating...")
+            range = (np.min(bins),np.max(bins));
+        else:
+            print("asd range provided")
         self.xAxis.setRange(*range);
         self.yAxis.setRange(np.min(hist),np.max(hist));
 
@@ -1729,7 +1764,7 @@ class HistogramAdjustWidget(QWidget,DataObject,RangeComponent):
         return super().resizeEvent(a0)
 
     def loadData(self, data):
-        self.slider.setRange(*data);
+        self.slider.setRange(*data,emit=False);
     
     def getSaveData(self):
         range = self.slider.getRange();
@@ -1742,7 +1777,7 @@ class SliderChartView(QChartView):
     def __init__(self,chart,slider:RangeSlider,sliderHeight=None):
         super().__init__(chart);
         self.slider = slider;
-        self.slider.rangeChanged.connect(self.updateGraphClip)
+        self.slider.sliderMoved.connect(self.updateGraphClip)
         self.sliderProxy = self.scene().addWidget(self.slider);
         self.sliderProxy.installEventFilter(self.slider);
         self.sliderProxy.setAcceptHoverEvents(True);
@@ -1887,11 +1922,11 @@ class ExportPanel(QWidget,DataObject):
         if Defaults.convertUnassignedMasks:
             self.typeLabel = QLabel("Default Mask Export Type:") #TODO: Make more clear that this only affects newly created files
             self.typeSelector = QComboBox(self);
+            self.typeSelector.setEditable(True);
             self.completer = QCompleter(QStringListModel(Defaults.supportedMaskExts),self);
             self.typeSelector.setCompleter(self.completer);
             self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive);
             self.typeSelector.setInsertPolicy(QComboBox.InsertPolicy.NoInsert);
-            self.typeSelector.setEditable(True);
             self.typeSelector.addItems(Defaults.supportedMaskExts)
             self.typeSelector.setValidator(QStringListValidator(Defaults.supportedMaskExts))
             self.layout.addWidget(self.typeLabel,0,0,1,2);
@@ -1941,7 +1976,7 @@ class QMainSegmentWindow(QMainWindow,DataObject):
     def __init__(self):
         super().__init__();
         self.setStatusBar(SegmenterStatusBar());
-        self.setWindowTitle("Mask Segmenter v0.3");
+        self.setWindowTitle("Mask Editor v0.4");
         self.segmenter = MaskSegmenter(self,parent=self,status=self.statusBar());
         self.setCentralWidget(self.segmenter);
         self.createActions();

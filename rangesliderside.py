@@ -10,6 +10,7 @@ from numpy.core.fromnumeric import shape
 class RangeSlider(QWidget):
     rangeLimitChanged = pyqtSignal(int,int)
     rangeChanged = pyqtSignal(int,int)
+    sliderMoved = pyqtSignal(int,int);
 
 
     def __init__(self, range=(1,8), rangeLimit=(0,10), parent=None):
@@ -47,6 +48,7 @@ class RangeSlider(QWidget):
         self.first_position = start
         self.second_position = end
         self.update();
+        self.sliderMoved.emit(start,end);
         if emit:
             self.rangeChanged.emit(start,end);
 
@@ -173,6 +175,7 @@ class RangeSlider(QWidget):
             if self._first_sc == QStyle.SubControl.SC_SliderHandle:
                 if pos < self.second_position:
                     self.first_position = pos
+                    self.sliderMoved.emit(self.first_position,self.second_position);
                     self.rangeChanged.emit(self.first_position,self.second_position);
                     self.update()
                     return
@@ -180,6 +183,7 @@ class RangeSlider(QWidget):
             if self._second_sc == QStyle.SubControl.SC_SliderHandle:
                 if pos > self.first_position:
                     self.second_position = pos
+                    self.sliderMoved.emit(self.first_position,self.second_position);
                     self.rangeChanged.emit(self.first_position,self.second_position);
                     self.update()
         else:
