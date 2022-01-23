@@ -13,7 +13,7 @@ class RangeSlider(QWidget):
     sliderMoved = pyqtSignal(int,int);
 
 
-    def __init__(self, range=(1,8), rangeLimit=(0,10), parent=None):
+    def __init__(self, range:list[int]=(1,8), rangeLimit=(0,10), parent=None):
         super().__init__(parent)
 
         self.cursorIn = False;
@@ -95,7 +95,7 @@ class RangeSlider(QWidget):
         )
         painter.setPen(QColor(80,80,80));
         painter.setBrush(QColor(80,80,80));
-        groove_rect.adjust(0,groove_rect.height()/6,0,-groove_rect.height()/6);
+        groove_rect.adjust(0,int(groove_rect.height()/6),0,-int(groove_rect.height()/6));
         painter.drawRect(groove_rect);
         #self.style().drawComplexControl(QStyle.ComplexControl.CC_Slider, self.opt, painter)
         #self.style().drawControl(QStyle.ControlElement.CE_ScrollBarSlider, self.opt, painter);
@@ -107,6 +107,7 @@ class RangeSlider(QWidget):
         painter.setBrush(QBrush(color))
         painter.setPen(Qt.PenStyle.NoPen)
 
+        print(self.opt.minimum,self.first_position);
         self.opt.sliderPosition = max(self.opt.minimum,self.first_position);
         left_handle = (
             self.style()
@@ -169,7 +170,7 @@ class RangeSlider(QWidget):
             distance = self.opt.maximum - self.opt.minimum
 
             pos = self.style().sliderValueFromPosition(
-                0, distance, event.position().x(), self.rect().width()
+                0, distance, int(event.position().x()), self.rect().width()
             )
 
             if self._first_sc == QStyle.SubControl.SC_SliderHandle:

@@ -314,7 +314,8 @@ class NextPrevButtons(QtWidgets.QWidget):
 if __name__ == '__main__':
     app = QtWidgets.QApplication(sys.argv)
     window = QtWidgets.QMainWindow();
-    ex = EditorPane("C:\\Users\\miner\\OneDrive\\Documents\\Python\\SegmenterGui\\testscraps",parent=window);
+    ex = EditorPane("C:\\Users\\Harrison Truscott\\Documents\\GitHub\\SegmenterGui\\testscraps\\",parent=window);
     window.setCentralWidget(ex);
     window.show();
     app.exec()
+#tiles = [im[x:x+M,y:y+N] for x in range(0,im.shape[0],M) for y in range(0,im.shape[1],N)]

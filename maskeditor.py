@@ -43,7 +43,7 @@ class Defaults:
     autosaveTime = 60*1000; #milliseconds
     exportedFlagFile = "export.flag";
     attemptMaskResize = True;
-    penPreview = False;
+    penPreview = True;
     previewWidth = 1.2;
     allowMaskCreation = True;
     defaultMaskFormat = ".bmp";
@@ -65,7 +65,7 @@ def getTypes(dic:dict,types:set=set()):
             print(f"Value {v} with key {k} has type int64")
     return types;
         
-
+hello = 5;
 if Defaults.loadMode == LoadMode.biof:
     import bioformats as bf
     import javabridge
@@ -141,6 +141,8 @@ class MaskSegmenter(QSplitter,DataObject):
         self.createObjects(window,status);
     
     def createObjects(self,window,statusBar=None):
+        global hello
+        hello = self;
         self.setFocus();
 
         if not os.path.exists(Defaults.workingDirectory):
@@ -183,6 +185,8 @@ class MaskSegmenter(QSplitter,DataObject):
         self.editor.toolbar.adjustButton.installEventFilter(self);
         self.data.selector.maskDirChooser.browseButton.installEventFilter(self);
         self.data.selector.imageDirChooser.browseButton.installEventFilter(self);
+        self.data.exportPane.exportButton.installEventFilter(self);
+        self.data.exportPane.clearButton.installEventFilter(self);
 
         ### SESSION SAVING STUFF
         self.autosaveTimer = QTimer(self);
@@ -553,6 +557,7 @@ class MaskContainer(QWidget,DataObject):
     #both image and mask are filenames
     @pyqtSlot(str,str)
     def switchImage(self,image=None,mask=None):
+        print(f"switching image, extant mask: {mask}")
         errored = False;
         if image == "":
             image = None;
@@ -1305,27 +1310,26 @@ class ImageSelectorPane(QWidget,DataObject):
             imName = self.getSelectedImageName(row)
             imagePath = self.imageDirChooser.dire+"/"+imName;
             maskPath = None;
-            if self.maskDirChooser.dire:
-                baseName = os.path.splitext(imName)[0];
-                print(f"looking for mask with basename: {baseName}");
-                workingFiles = os.listdir(Defaults.workingDirectory);
-                #print(f"Working files: {workingFiles}");
-                workingMasks = list(filter(lambda x: x.startswith(baseName+".") and x.lower().endswith(tuple(Defaults.supportedMaskExts)),workingFiles));
-                #print(f"Working Masks: {workingMasks}")
-                maskName = workingMasks[0] if len(workingMasks) > 0 else None;
-                if not(maskName):
-                    maskfiles = os.listdir(self.maskDirChooser.dire);
-                    goodMasks = list(filter(lambda x: x.startswith(baseName+".") and x.lower().endswith(tuple(Defaults.supportedMaskExts)),maskfiles));
-                    if len(goodMasks) > 0:
-                        maskName = goodMasks[0]
-                        if (len(goodMasks) > 1):
-                            print(f"warning: more than one mask file with the same name, unsupported behavior. Using {maskName}");
-                        maskPath = (self.maskDirChooser.dire+"/"+maskName);
-                else:
-                    maskPath = (Defaults.workingDirectory+maskName);
+            baseName = os.path.splitext(imName)[0];
+            print(f"looking for mask with basename: {baseName}");
+            workingFiles = os.listdir(Defaults.workingDirectory);
+            #print(f"Working files: {workingFiles}");
+            workingMasks = list(filter(lambda x: x.startswith(baseName+".") and x.lower().endswith(tuple(Defaults.supportedMaskExts)),workingFiles));
+            #print(f"Working Masks: {workingMasks}")
+            maskName = workingMasks[0] if len(workingMasks) > 0 else None;
+            if maskName:
+                maskPath = (Defaults.workingDirectory+maskName)
+            elif self.maskDirChooser.dire:
+                maskfiles = os.listdir(self.maskDirChooser.dire);
+                goodMasks = list(filter(lambda x: x.startswith(baseName+".") and x.lower().endswith(tuple(Defaults.supportedMaskExts)),maskfiles));
+                if len(goodMasks) > 0:
+                    maskName = goodMasks[0]
+                    if (len(goodMasks) > 1):
+                        print(f"warning: more than one mask file with the same name, unsupported behavior. Using {maskName}");
+                    maskPath = (self.maskDirChooser.dire+"/"+maskName);
             self.imLoadStart.emit()
             self.repaint();
-            self.prepImageChange.emit();
+            self.prepImageChange.emit();    
             self.imageChanged.emit(imagePath,maskPath);
             self.imLoadEnd.emit()
 
@@ -1794,7 +1798,8 @@ class SliderChartView(QChartView):
         super().resizeEvent(event)
         self.chart().resize(self.chart().size().shrunkBy(QMarginsF(0,0,0,self.sliderHeight)))
         plotArea = self.chart().plotArea();
-        self.slider.setGeometry(QRect(plotArea.left(),self.chart().rect().bottom(),plotArea.width(),self.sliderHeight));
+        print(plotArea.left(),int(self.chart().rect().bottom()),plotArea.width(),self.sliderHeight);
+        self.slider.setGeometry(QRect(int(plotArea.left()),int(self.chart().rect().bottom()),int(plotArea.width()),self.sliderHeight));
         self.updateGraphClip();
 
     def updateGraphClip(self):
@@ -2052,11 +2057,17 @@ class QMainSegmentWindow(QMainWindow,DataObject):
 
     def shortcuts(self):
         shortcutList = [(action.text(),action.shortcut().toString()) for action in self.actions if action.shortcut()]
-        shortcutList += [("Toggle Draw Mode","Hold Ctrl/Shift"),("Hide Mask","Hold Space"),("Zoom In/Out","Ctrl+Scroll Up/Scroll Down")];
+        shortcutList += [("Toggle Draw Mode","Hold Ctrl/Shift"),("Hide Mask","Hold Space"),("Zoom In/Out","Ctrl+Scroll Up/Scroll Down"),("Scroll Left/Right", "Alt+Scroll Up/ Scroll Down")];
         QMessageBox.information(self,"Keyboard Shortcuts","\n".join(["{0}: {1}".format(name,key) for (name,key) in shortcutList]),QMessageBox.StandardButton.Ok,defaultButton=QMessageBox.StandardButton.Ok);
             
     def closeEvent(self, a0: QCloseEvent) -> None:
         return self.segmenter.closeEvent(a0);
+    
+    def mousePressEvent(self, event):
+        focused_widget = QApplication.focusWidget()
+        if isinstance(focused_widget, QLineEdit) or isinstance(focused_widget,QComboBox):
+            focused_widget.clearFocus()
+        QMainWindow.mousePressEvent(self, event)
         
 def init_logger():
     """This is so that Javabridge doesn't spill out a lot of DEBUG messages
