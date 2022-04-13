@@ -12,7 +12,7 @@ class RangeSlider(QWidget):
     rangeChanged = pyqtSignal(int,int)
     sliderMoved = pyqtSignal(int,int);
 
-
+#TODO: somewhere the integer 0,1000000.. being passed from the initializer in maskeditor is being converted to float
     def __init__(self, range:list[int]=(1,8), rangeLimit=(0,10), parent=None):
         super().__init__(parent)
 
@@ -20,8 +20,10 @@ class RangeSlider(QWidget):
 
         self.setMouseTracking(True);
 
-        self.first_position = range[0]
-        self.second_position = range[1]
+        self.first_position = int(range[0])
+        self.second_position = int(range[1]);
+        if self.first_position != range[0] or self.second_position != range[1]:
+            raise Exception("range slider input not intable");
 
         self._first_sc = None;
         self._second_sc = None;
@@ -44,7 +46,9 @@ class RangeSlider(QWidget):
             self.rangeLimitChanged.emit(minimum,maximum);
 
     def setRange(self, start: int, end: int, emit=True):
-        print(F"slider range set{', emitting' if emit else ''}")
+        start = int(start);
+        end = int(end);
+        print(F"slider range set: {start,end}{', emitting' if emit else ''}")
         self.first_position = start
         self.second_position = end
         self.update();
@@ -172,6 +176,10 @@ class RangeSlider(QWidget):
             pos = self.style().sliderValueFromPosition(
                 0, distance, int(event.position().x()), self.rect().width()
             )
+
+            if isinstance(pos,float):
+                print(f"ABCD ERROR: pos {pos} is float");
+                pos = int(pos);
 
             if self._first_sc == QStyle.SubControl.SC_SliderHandle:
                 if pos < self.second_position:

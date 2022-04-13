@@ -1,3 +1,8 @@
 export_nucs/
 export/
 working_masks/
+random_output/
+image_preprocess.py
+invert_mask.py
+mask_postprocess.py
+random_s4_t63.tif

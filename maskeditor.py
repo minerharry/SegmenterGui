@@ -1,10 +1,12 @@
+from typing_extensions import Type
+import parsend
 from to_precision import std_notation
 from rangesliderside import RangeSlider
 from PyQt6 import QtGui
 from PyQt6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 from PyQt6.QtWidgets import QAbstractItemView, QAbstractSlider, QApplication, QCheckBox, QComboBox, QCompleter, QDialog, QFileDialog, QGraphicsScene, QGraphicsView, QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit, QListView, QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QSlider, QSplitter, QStatusBar, QStyle, QStyleOptionFrame, QToolButton, QVBoxLayout, QWidget
 from PyQt6 import QtCore
-from PyQt6.QtCore import QFile, QLineF, QMarginsF, QPoint, QPointF, QRect, QRectF, QSignalMapper, QSize, QStringListModel, QTimer, Qt, pyqtSignal, pyqtSlot, QObject, QEvent
+from PyQt6.QtCore import QFile, QLineF, QMarginsF, QPoint, QPointF, QRect, QRectF, QSignalMapper, QSize, QStringListModel, QTimer, Qt, pyqtSignal, pyqtSlot, QObject, QEvent, QUrl
 from PyQt6.QtGui import QAction, QBitmap, QBrush, QCloseEvent, QColor, QCursor, QDoubleValidator, QFontMetrics, QGuiApplication, QIcon, QImage, QImageWriter, QIntValidator, QMouseEvent, QPainter, QPen, QPixmap, QShortcut, QKeySequence, QTextDocument, QTransform, QUndoCommand, QUndoStack, QValidator
 import numpy as np
 
@@ -28,7 +30,7 @@ class Defaults:
     blankColor = QColor(0,0,0,0);
     opacity = 0.5;
     defaultFG = QColor(0,0,0,0);
-    defaultBG = QColor(50,0,0,80);
+    defaultBG = QColor(70,0,0,60);
     bmapFG = Qt.GlobalColor.color0
     bmapBG = Qt.GlobalColor.color1;
     defaultBrushSize = 10;
@@ -42,7 +44,7 @@ class Defaults:
     supportedMaskExts = supportedImageExts; #TODO: filter list by image formats and not just supported formats
     autosaveTime = 60*1000; #milliseconds
     exportedFlagFile = "export.flag";
-    attemptMaskResize = True;
+    attemptMaskResize = False;
     penPreview = True;
     previewWidth = 1.2;
     allowMaskCreation = True;
@@ -237,7 +239,8 @@ class MaskSegmenter(QSplitter,DataObject):
 
 
     def receiveError(self,error_msg,timeout=None):
-        print(f"ERROR: {error_msg}");
+        if error_msg is not None and error_msg != '':
+            print(f"ERROR: {error_msg}");
         if self.statusBar:
             self.statusBar.showErrorMessage(error_msg,timeout=timeout);
 
@@ -397,7 +400,7 @@ class EditorPane(QWidget,DataObject):
         if Defaults.penPreview:
             self.toolbar.slider.valueChanged.connect(self.maskView.setPreviewDiameter);
         self.toolbar.drawButtons.valueChanged.connect(self.maskView.maskContainer.mask.setDrawMode);
-        self.toolbar.maskCheck.toggled.connect(lambda x: self.maskView.maskContainer.mask.setVisible(not(x)));
+        self.toolbar.maskCheck.toggled.connect(lambda x: self.maskView.maskContainer.mask.setPixlayerVisibility(not(x)));
         self.toolbar.zButtons.zoomed.connect(self.maskView.zoom);
         self.toolbar.adjustDialog.pixelRangeChanged.connect(self.maskView.maskContainer.setOverrideRescale);
         self.toolbar.adjustDialog.rangeReset.connect(self.maskView.maskContainer.resetOverride);
@@ -409,6 +412,7 @@ class MaskedImageView(QGraphicsView,DataObject):
     wheel_factor = 0.1;
     zoomChanged = pyqtSignal(float);
     cursorUpdate = pyqtSignal(QPointF);
+    tabletErasing = pyqtSignal(bool);
 
     def __init__(self,parent=None):
         super().__init__(parent);
@@ -426,6 +430,8 @@ class MaskedImageView(QGraphicsView,DataObject):
         print(self.proxy.rect().topLeft());
         self.maskContainer.sizeChanged.connect(self.proxyChanged);
         self.setScene(self.scene);
+        # self.tabletErasing = False;
+        self.tabletErasing.connect(self.maskContainer.mask.setTabletErasing)
         if Defaults.penPreview:
             self.setMouseTracking(True);
             self.mousePos = None;
@@ -483,7 +489,21 @@ class MaskedImageView(QGraphicsView,DataObject):
         if Defaults.penPreview:
             self.updatePreview();
 
+    def tabletEvent(self, a0: QtGui.QTabletEvent) -> None:
+        if a0.isPointerEvent():
+            print("pointed");
+            if a0.pointerType() == QtGui.QPointingDevice.PointerType.Eraser:
+                self.tabletErasing.emit(True);
+                # print(f"tablet erasing: {self.tabletErasing}")
+            else:
+                self.tabletErasing.emit(False);
+                # print(f"tablet erasing: {self.tabletErasing}")
+        elif a0.type() == QEvent.Type.TabletRelease:
+            self.tabletErasing.emit(False);
+            # print(f"tablet erasing: {self.tabletErasing}")
+
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
+        # print("mouse moved")
         if Defaults.penPreview:
             self.mousePos = event.position().toPoint();
             self.updatePreview();
@@ -667,10 +687,11 @@ class MaskContainer(QWidget,DataObject):
             print("BEEP BOP BOOP SKIMAGE LOADING A FILE BEEP BOP BOOP")
             bitData = imread(map);
         if (rsize):
+            print("resizing")
             if isinstance(rsize,QSize):
                 rsize = [rsize.height(),rsize.width()];
             if (bitData.shape != rsize):
-                bitData = resize(bitData,rsize,anti_aliasing=True);
+                bitData = resize(bitData,rsize,anti_aliasing=False);
         bitData = rescale_intensity(bitData,'image',np.uint16);
         shape = bitData.shape;
         return QBitmap(QImage(bitData.data, shape[1], shape[0], 2*shape[1], QImage.Format.Format_Grayscale16));
@@ -689,10 +710,12 @@ class ImageMask(QLabel,DataObject):
         self.lastPos = None;
 
     def update(self):
-        self.setPixmap(self.pixlayer);
+        if self.pixVisible:
+            self.setPixmap(self.pixlayer);
         super().update();
 
     def createObjects(self,initSize=Defaults.blankSize):
+        self.pixVisible = True;
         self.fileName = None;
         self.fgColor = Defaults.defaultFG;
         self.bgColor = Defaults.defaultBG;
@@ -707,8 +730,21 @@ class ImageMask(QLabel,DataObject):
         self.reloadPixLayer();
         self.setPixmap(self.pixlayer);
         self.maskUpdate.connect(self.save);
+        self.blankLayer = QPixmap(self.pixlayer.size());
+        self.blankLayer.fill(Defaults.blankColor);
 
-        self.resetUndoStack();#new states added to the end; lower number is more recent
+
+        self.tabletErasing = False;
+
+        self.resetUndoStack();
+
+    def setPixlayerVisibility(self,visible):
+        self.pixVisible = visible;
+        if visible:
+            self.setPixmap(self.pixlayer);
+        else:
+            self.setPixmap(self.blankLayer);
+        
 
     def resetUndoStack(self):
         #print("undo reset");
@@ -750,6 +786,9 @@ class ImageMask(QLabel,DataObject):
         # print(f"undo stack updated, size: {len(self.undoStates)}, index: {self.undoIndex}, with ids: {self.undoIds}");
         #print(self.bitlayer.toImage().pixel(self.pressPos.toPoint()));
 
+    def setTabletErasing(self,erase):
+        self.tabletErasing = erase;
+
     def mouseMoveEvent(self, e, dot=False):
         #print(e.position())
         if not(dot) and self.lastPos is None: # First event.
@@ -757,19 +796,22 @@ class ImageMask(QLabel,DataObject):
             return # Ignore the first time.
 
         colors = [self.fgColor,self.bgColor];
+        inversion = -1 if self.tabletErasing else 0;
+        print("tablet inversion effect:",inversion + self.drawMode)
+        ##invert colors NOTE: make sure this wild west inversion doesn't interfere with anything else lol
 
         #print("painting bit");
         #print(self.bitlayer.paintEngine())
         bitpainter = QPainter(self.bitlayer)
         bitpainter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source);
         if dot:
-            self.brush.setColor(self.bitcolors[self.drawMode]);
+            self.brush.setColor(self.bitcolors[inversion + self.drawMode]);
             bitpainter.setPen(Qt.PenStyle.NoPen)
             bitpainter.setBrush(self.brush)
             bitpainter.drawEllipse(e.position(),self.pen.widthF()/2,self.pen.widthF()/2);
             #print(f"circle drawn, at position {e.position()} of radii {self.pen.widthF()}");
         else:
-            self.pen.setColor(self.bitcolors[self.drawMode]);
+            self.pen.setColor(self.bitcolors[inversion + self.drawMode]);
             bitpainter.setPen(self.pen);
             bitpainter.drawLine(self.lastPos, e.position())
         bitpainter.end()
@@ -780,13 +822,13 @@ class ImageMask(QLabel,DataObject):
         pixpainter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source);
 
         if dot:
-            self.brush.setColor(colors[self.drawMode]);
+            self.brush.setColor(colors[inversion + self.drawMode]);
             pixpainter.setPen(Qt.PenStyle.NoPen)
             pixpainter.setBrush(self.brush)
             pixpainter.drawEllipse(e.position(),self.pen.widthF()/2,self.pen.widthF()/2);
             #print(f"circle drawn, at position {e.position()} of radii {self.pen.widthF()}");
         else:
-            self.pen.setColor(colors[self.drawMode]);
+            self.pen.setColor(colors[inversion + self.drawMode]);
             pixpainter.setPen(self.pen);
             pixpainter.drawLine(self.lastPos, e.position())
         pixpainter.end();
@@ -797,7 +839,9 @@ class ImageMask(QLabel,DataObject):
         #print("moved");
 
 
+
     def mousePressEvent(self, ev: QMouseEvent) -> None:
+        # print("mouse pressed");
         self.pressPos = ev.position();
         #print(self.bitlayer.toImage().pixel(self.pressPos.toPoint()));
         self.mouseMoveEvent(ev,dot=True);
@@ -805,7 +849,7 @@ class ImageMask(QLabel,DataObject):
 
     def mouseReleaseEvent(self, e): #guaranteed called whenever mouse released after clicking on pane
         self.lastPos = None;
-        print("mouse released")
+        # print("mouse released")
         self.maskUpdate.emit();
         self.pushUndoStack();
         #print("released");
@@ -813,6 +857,8 @@ class ImageMask(QLabel,DataObject):
     def reloadPixLayer(self): 
         print("pix layer reloaded");
         self.pixlayer = QPixmap(self.bitlayer.size());
+        self.blankLayer = QPixmap(self.pixlayer.size());
+        self.blankLayer.fill(Defaults.blankColor);
         self.pixlayer.fill(self.fgColor)
         pixptr = QPainter(self.pixlayer);
         pixptr.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source);
@@ -857,10 +903,11 @@ class ImageMask(QLabel,DataObject):
     def save(self):
         if (self.fileName is not None):
             print(f"attempting save to {self.fileName}");
-            saveName = self.fileName;
-            names = os.path.splitext(self.fileName);
-            if (names[1][1:].lower() not in QImageWriter.supportedImageFormats()):
-                saveName = names[0] + Defaults.defaultMaskFormat;
+            # saveName = self.fileName;
+            # names = os.path.splitext(self.fileName);
+            # # if (names[1][1:].lower() not in QImageWriter.supportedImageFormats() or names[1][1:].lower() == 'tif'):
+            #     saveName = names[0] + Defaults.defaultMaskFormat;
+            saveName = os.path.splitext(self.fileName)[0] + Defaults.defaultMaskFormat;
             self.bitlayer.save(Defaults.workingDirectory+saveName);
             if (os.path.exists(Defaults.exportedFlagFile)):
                 os.remove(Defaults.exportedFlagFile)
@@ -1120,10 +1167,10 @@ class ImageSelectorPane(QWidget,DataObject):
         super().__init__(parent);
         self.createObjects(export);
 
-    def createObjects(self,export):
+    def createObjects(self,export): 
         self.importConfirm = MaskUnexportedDialog(
             "Warning: You have unexported masks. \nImporting new masks will overwrite the current changes. \nContinue?",
-            buttonNames=["Overwrite Masks","Export Unsaved Masks"]);
+            buttonNames=["Overwrite Masks","Export Unsaved Masks"]); #TODO: Add "Transfer" option to transfer current working masks to new image directory
         self.imageChangeConfirm = MaskUnexportedDialog(
             "Warning: You have unexported masks. \nLoading a new image directory will overwrite the current changes. \nContinue?",
             buttonNames=["Overwrite Masks","Export Unsaved Masks"]);
@@ -1167,8 +1214,15 @@ class ImageSelectorPane(QWidget,DataObject):
         print("gonna grab some file paths");
         filesToExport = self.getAllMaskFilePaths(includeModify=True);
         print(f"paths retrieved: {len(filesToExport)}");
-        output = self.exportDialog.exec([os.path.basename(file) if isinstance(file,str) else os.path.basename(file[0]) for file in filesToExport]);
-        print(output);
+        
+        shortcuts = [QUrl(os.path.dirname(os.path.abspath(__file__)))];
+        if self.imageDirChooser.dire:
+            shortcuts.append(QUrl(self.imageDirChooser.dire));
+        if self.maskDirChooser.dire:
+            shortcuts.append(QUrl(self.maskDirChooser.dire));
+        print([url.isValid() for url in shortcuts])
+        output = self.exportDialog.exec(names=[os.path.basename(file) if isinstance(file,str) else os.path.basename(file[1]) for file in filesToExport],shortcuts=shortcuts,startpos=self.maskDirChooser.dire);
+
         if (output != 0):
             self.exportStart.emit();
             exportDir = self.exportDialog.selectedFiles()[0];
@@ -1266,7 +1320,15 @@ class ImageSelectorPane(QWidget,DataObject):
         if dire and dire != '':
             filtered = list(filter(lambda x: x.lower().endswith(tuple(Defaults.supportedImageExts)),os.listdir(dire)));
             filtered.sort(key = lambda e: (len(e),e));
+            if any(filter(lambda x: x.lower().endswith('.nd'),os.listdir(dire))):
+                # print(filtered);
+                try:
+                    filtered = parsend.sorted_dir(filtered);
+                except Exception as e:
+                    print(e);
+                # print(filtered);
             self.model.setStringList(filtered);
+
         else:
             self.model.setStringList([]);
         #print(self.list.currentIndex().row());
@@ -1716,7 +1778,7 @@ class HistogramAdjustWidget(QWidget,DataObject,RangeComponent):
         width = self.slider.max()-smin;
         xMin = self.xAxis.min();
         xWidth = self.xAxis.max() - xMin;
-        newRange = [((pt-xMin)/xWidth*width+smin) for pt in [min,max]];
+        newRange = [((pt-xMin)//xWidth*width+smin) for pt in [min,max]];
         # print(f"adjusted range: {newRange}");
         self.slider.setRange(*newRange,emit=False);
         self.view.updateGraphClip();
@@ -1884,7 +1946,11 @@ class QExportDialog(QFileDialog):
         yesbtn.clicked.connect(self.dialog.accept);
         nobtn.clicked.connect(self.dialog.reject);
 
-    def exec(self,names=None):
+    def exec(self,names=None,shortcuts=None,startpos=None):
+        if shortcuts:
+            self.setSidebarUrls(self.sidebarUrls() + shortcuts);
+        if startpos:
+            self.setDirectory(os.path.join(startpos, '..'));
         self.names = names;
         return super().exec();
 
@@ -1985,6 +2051,13 @@ class QMainSegmentWindow(QMainWindow,DataObject):
         self.segmenter = MaskSegmenter(self,parent=self,status=self.statusBar());
         self.setCentralWidget(self.segmenter);
         self.createActions();
+
+    def tabletEvent(self, a0: QtGui.QTabletEvent) -> None:
+        if a0.isPointerEvent() and a0.type() == QEvent.Type.TabletPress:
+            print(f"tablet event received: {a0}")
+            print(f"pointer type: {a0.pointerType()}")
+            a0.accept();
+        return super().tabletEvent(a0)
 
     def createActions(self):
         self.prevAction = QAction("Previous Image");
