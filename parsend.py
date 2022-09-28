@@ -1,4 +1,3 @@
-from msilib.schema import Error
 import re
 series_regex = "s([0-9]+)"
 time_regex = "t([0-9]+)"
@@ -38,9 +37,5 @@ def sorted_dir(paths:list[str]):
         print("hello my darling")
     return paths;
 
-# def getNDFileInfo(path):
-#     args = parseND(path);
-    
-#     for arg,val in args.items():
-
-print(sorted_dir([f's{i}_t{j}.TIF' for i in range(5) for j in range(30)]))
+if __name__ == "__main__":
+    print(sorted_dir([f's{i}_t{j}.TIF' for i in range(5) for j in range(30)]))

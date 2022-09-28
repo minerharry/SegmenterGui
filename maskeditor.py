@@ -40,7 +40,7 @@ class Defaults:
     drawButtonsLabel = "Draw Mode";
     workingDirectory = "working_masks/";
     sessionFileName = "session_dat.json";
-    supportedImageExts = [".bmp",".png",".jpg",".PBM",".jpeg",".tif",".sld",".aim",".al3d",".gel",".am",".amiramesh",".grey",".hx",".labels",".cif",".img",".hdr",".sif",".afi",".svs",".htd",".pnl",".avi",".arf",".exp",".sdt",".1sc",".pic",".raw",".xml",".scn",".ims",".cr2",".crw",".ch5",".c01",".dib",".dv",".r3d",".dcm",".dicom",".v",".eps",".epsi",".ps",".flex",".mea",".res",".tiff",".fits",".dm3",".dm4",".dm2",".gif",".naf",".his",".vms",".txt",".i2i",".ics",".ids",".seq",".ipw",".hed",".mod",".leff",".obf",".msr",".xdce",".frm",".inr",".ipl",".ipm",".dat",".par",".jp2",".jpk",".jpx",".xv",".bip",".fli",".lei",".lif",".scn",".sxm",".l2d",".lim",".stk"]; 
+    supportedImageExts = [".bmp",".png",".jpg",".PBM",".jpeg",".tif",".sld",".aim",".al3d",".gel",".am",".amiramesh",".grey",".hx",".labels",".cif",".img",".hdr",".sif",".afi",".svs",".htd",".pnl",".avi",".arf",".exp",".sdt",".1sc",".pic",".raw",".xml",".scn",".ims",".cr2",".crw",".ch5",".c01",".dib",".dv",".r3d",".dcm",".dicom",".v",".eps",".epsi",".ps",".flex",".mea",".res",".tiff",".fits",".dm3",".dm4",".dm2",".gif",".naf",".his",".vms",".i2i",".ics",".ids",".seq",".ipw",".hed",".mod",".leff",".obf",".msr",".xdce",".frm",".inr",".ipl",".ipm",".dat",".par",".jp2",".jpk",".jpx",".xv",".bip",".fli",".lei",".lif",".scn",".sxm",".l2d",".lim",".stk"]; 
     supportedMaskExts = supportedImageExts; #TODO: filter list by image formats and not just supported formats
     autosaveTime = 60*1000; #milliseconds
     exportedFlagFile = "export.flag";
@@ -67,7 +67,6 @@ def getTypes(dic:dict,types:set=set()):
             print(f"Value {v} with key {k} has type int64")
     return types;
         
-hello = 5;
 if Defaults.loadMode == LoadMode.biof:
     import bioformats as bf
     import javabridge
@@ -143,8 +142,6 @@ class MaskSegmenter(QSplitter,DataObject):
         self.createObjects(window,status);
     
     def createObjects(self,window,statusBar=None):
-        global hello
-        hello = self;
         self.setFocus();
 
         if not os.path.exists(Defaults.workingDirectory):
