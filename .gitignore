@@ -2,6 +2,7 @@ export_nucs/
 export/
 working_masks/
 random_output/
+__pycache__/
 image_preprocess.py
 invert_mask.py
 mask_postprocess.py

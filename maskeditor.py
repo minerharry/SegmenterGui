@@ -1,4 +1,3 @@
-from typing_extensions import Type
 import parsend
 from to_precision import std_notation
 from rangesliderside import RangeSlider
