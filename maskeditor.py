@@ -448,25 +448,18 @@ class MaskedImageView(QGraphicsView,DataObject):
         self.scene.setSceneRect(self.proxy.rect());
 
         
-    def updatePreview(self): #TODO: fix ghost lines; #TODO: make visible on all colors w/ black&white
+    def updatePreview(self): #TODO: make visible on all colors w/ black&white
         if self.mousePos:
             pos = self.mapToScene(self.mousePos);
             margin = self.previewThickness + 20;
             origin = self.preview.rect().adjusted(-margin,-margin,margin,margin);
-            self.preview.setVisible(True); #-self.proxy.rect().topLeft().x() -self.proxy.rect().topLeft().y()
-            self.preview.prepareGeometryChange();
+            self.preview.setVisible(True); 
             newRect = QRectF(pos.x()-self.diameter/2,pos.y()-self.diameter/2,self.diameter,self.diameter);
             self.preview.setRect(newRect)
-            self.backPreview.setVisible(True); #-self.proxy.rect().topLeft().x() -self.proxy.rect().topLeft().y()
-            self.backPreview.prepareGeometryChange();
+            self.backPreview.setVisible(True);
             self.backPreview.setRect(newRect);
-            self.backPreview.update();
-            self.preview.update();
             self.repaint(origin.toRect());
             self.repaint(newRect.adjusted(-margin,-margin,margin,margin).toRect());
-            #penWidth = 0.5/self.scaleFactor;
-            #print(penWidth);
-            #self.preview.pen().setWidth(0.5/self.scaleFactor);
         else:
             self.backPreview.setVisible(False);
             self.preview.setVisible(False);
