@@ -786,7 +786,7 @@ class ImageMask(QLabel,DataObject):
 
         colors = [self.fgColor,self.bgColor];
         inversion = -1 if self.tabletErasing else 0;
-        print("tablet inversion effect:",inversion + self.drawMode)
+        # print("tablet inversion effect:",inversion + self.drawMode)
         ##invert colors NOTE: make sure this wild west inversion doesn't interfere with anything else lol
 
         #print("painting bit");
