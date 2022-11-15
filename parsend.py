@@ -1,4 +1,5 @@
 import re
+from typing import List
 series_regex = "s([0-9]+)"
 time_regex = "t([0-9]+)"
 
@@ -16,7 +17,7 @@ def parseND(filePath):
         args[largs[0].replace("\"","")] = largs[1].replace("\"","");
     return args;
 
-def sorted_dir(paths:list[str]):
+def sorted_dir(paths:List[str]):
     def get_key(s:str):
         out = [];
         series = re.findall(series_regex,s);

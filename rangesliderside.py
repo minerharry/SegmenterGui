@@ -3,6 +3,7 @@ from PyQt6.QtGui import QBrush, QColor, QCursor, QGuiApplication, QMouseEvent, Q
 from PyQt6.QtWidgets import QApplication, QMainWindow, QPushButton, QSizePolicy, QSlider, QStyle, QStyleFactory, QStyleOptionSlider, QVBoxLayout, QWidget
 from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt, pyqtSignal
 import sys
+from typing import Tuple
 
 from numpy import positive
 from numpy.core.fromnumeric import shape
@@ -13,7 +14,7 @@ class RangeSlider(QWidget):
     sliderMoved = pyqtSignal(int,int);
 
 #TODO: somewhere the integer 0,1000000.. being passed from the initializer in maskeditor is being converted to float
-    def __init__(self, range:tuple[int,int]=(1,8), rangeLimit=(0,10), parent=None):
+    def __init__(self, range:Tuple[int,int]=(1,8), rangeLimit=(0,10), parent=None):
         super().__init__(parent)
 
         self.cursorIn = False;
