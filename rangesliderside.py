@@ -154,14 +154,17 @@ class RangeSlider(QWidget):
         self.style().drawComplexControl(QStyle.ComplexControl.CC_Slider, self.opt, painter)
 
     def mousePressEvent(self, event: QMouseEvent):
+        print("range slider - mouse press event");
         #IMPORTANT: the click check order is the reverse of the draw order to ensure that the handle that is drawn second - ie, the one that looks "on top" - is given selection priority
         if self._first_sc != QStyle.SubControl.SC_SliderHandle:
+            print("not first sc");
             self.opt.sliderPosition = self.second_position
             self._second_sc = self.style().hitTestComplexControl(
                 QStyle.ComplexControl.CC_Slider, self.opt, event.position().toPoint(), self
             )
 
         if self._second_sc != QStyle.SubControl.SC_SliderHandle:
+            print("not second sc");
             self.opt.sliderPosition = self.first_position
             self._first_sc = self.style().hitTestComplexControl(
                 QStyle.ComplexControl.CC_Slider, self.opt, event.position().toPoint(), self
