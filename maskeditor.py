@@ -233,11 +233,11 @@ class MaskSegmenter(QSplitter,DataObject):
         
 
 
-    def receiveError(self,error_msg,timeout=None):
+    def receiveError(self,error_msg,timeout=None,label=None):
         if error_msg is not None and error_msg != '':
             print(f"ERROR: {error_msg}");
         if self.statusBar:
-            self.statusBar.showErrorMessage(error_msg,timeout=timeout);
+            self.statusBar.showErrorMessage(error_msg,timeout=timeout,label=label);
 
     def closeEvent(self, a0: QCloseEvent) -> None:
         if (self.exitConfirm.exec()):
@@ -846,7 +846,7 @@ class ImageMask(QLabel,DataObject):
             if (os.path.exists(Defaults.exportedFlagFile)):
                 os.remove(Defaults.exportedFlagFile)
         else:
-            self.error.emit("No mask source loaded, unable to save mask",20000);
+            self.error.emit("No mask source loaded, unable to save mask",20000,"mask");
 
 
 class MaskToolbar(QWidget,DataObject): #TODO: Fix second slider handle seeming to jump all the way left after mask revert
@@ -1168,7 +1168,7 @@ class ImageSelectorPane(QWidget,DataObject):
                             data = bf.load_image(source);
                             bf.write_image(dest,data,data.dtype);
                     else:
-                        self.error.emit("NOT IMPLEMENTED - cannot create blank masks during export. Please turn off \'createEmptyMasksForExport\' in settings.")
+                        self.error.emit("NOT IMPLEMENTED - cannot create blank masks during export. Please turn off \'createEmptyMasksForExport\' in settings.",2000,"export")
                 elif (exportDir != os.path.dirname(path)): 
                     shutil.copy(path,exportDir);
             print("Export successful");
@@ -1613,7 +1613,7 @@ class AdjustmentDialog(QDialog,DataObject): #TODO: Make it clear that pixel inte
         self.saveState();
 
     def apply(self,useRange=True): #Emit signals to update image; until this is called, no changes propogate outwards
-        print("Adjustment Dialog: applying");
+        print("Adjustment Dialog: applying brightness/contrast settings");
         self.applied = True;
         self.dataChangedSinceApply = False;
         pers = self.persistent();
@@ -1646,14 +1646,13 @@ class AdjustmentDialog(QDialog,DataObject): #TODO: Make it clear that pixel inte
 
     def _setPixelRange(self,min,max,source=None): #only called internally, never emits
         self.dataChangedSinceApply = True;
-        print("Adjustment Dialog: setting internal pixel range store")
         for component in self.rangeComponents:
             if component != source:
                 component.setRange(min,max);
 
     @pyqtSlot()
     def imageChanged(self):
-        print(f"Adjustment Dialog: image changed received; persistent: {self.persistent()}, initialized: {self.initialized}")
+        print(f"Adjustment Dialog: image changed received; persistent change: {self.persistent()}, initialized: {self.initialized}")
         if self.initialized:
             self.apply(useRange=self.persistent())
 
@@ -1734,7 +1733,6 @@ class HistogramAdjustWidget(QWidget,DataObject,RangeComponent):
         xMin = self.xAxis.min();
         xWidth = self.xAxis.max() - xMin;
         outRange = [(pt-min)/width*xWidth+xMin for pt in range];
-        print(f"Calculated range: {outRange}");
         return outRange;
 
 

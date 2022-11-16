@@ -51,7 +51,7 @@ class RangeSlider(QWidget):
     def setRange(self, start: int, end: int, emit=True):
         start = int(start);
         end = int(end);
-        print(F"slider range set: {start,end}{', emitting' if emit else ''}")
+        # print(F"slider range set: {start,end}{', emitting' if emit else ''}")
         self.first_position = start
         self.second_position = end
         self.update();
@@ -106,7 +106,6 @@ class RangeSlider(QWidget):
         painter.setBrush(QBrush(color))
         painter.setPen(Qt.PenStyle.NoPen)
 
-        print(f"Slider minimum: {self.opt.minimum}, min value: {self.first_position}");
         self.opt.sliderPosition = max(self.opt.minimum,self.first_position);
         left_handle = (
             self.style()
@@ -119,13 +118,9 @@ class RangeSlider(QWidget):
             .subControlRect(QStyle.ComplexControl.CC_Slider, self.opt, QStyle.SubControl.SC_SliderHandle)
         )
 
-
-
         groove_rect = self.style().subControlRect(
             QStyle.ComplexControl.CC_Slider, self.opt, QStyle.SubControl.SC_SliderGroove
         )
-
-        print(f"Groove Rect: {groove_rect}, Left handle x: {left_handle}, right handle x: {right_handle}, my rect: {self.rect()}");
 
         selection = QRect(
             left_handle.right(),
@@ -146,17 +141,17 @@ class RangeSlider(QWidget):
         self.style().drawComplexControl(QStyle.ComplexControl.CC_Slider, self.opt, painter)
 
     def mousePressEvent(self, event: QMouseEvent):
-        print("range slider - mouse press event");
+        # print("range slider - mouse press event");
         #IMPORTANT: the click check order is the reverse of the draw order to ensure that the handle that is drawn second - ie, the one that looks "on top" - is given selection priority
         if self._first_sc != QStyle.SubControl.SC_SliderHandle:
-            print("not first sc");
+            # print("not first sc");
             self.opt.sliderPosition = self.second_position
             self._second_sc = self.style().hitTestComplexControl(
                 QStyle.ComplexControl.CC_Slider, self.opt, event.position().toPoint(), self
             )
 
         if self._second_sc != QStyle.SubControl.SC_SliderHandle:
-            print("not second sc");
+            # print("not second sc");
             self.opt.sliderPosition = self.first_position
             self._first_sc = self.style().hitTestComplexControl(
                 QStyle.ComplexControl.CC_Slider, self.opt, event.position().toPoint(), self
@@ -172,10 +167,6 @@ class RangeSlider(QWidget):
             pos = self.style().sliderValueFromPosition(
                 0, distance, int(event.position().x()), self.rect().width()
             )
-
-            if isinstance(pos,float):
-                print(f"ABCD ERROR: pos {pos} is float");
-                pos = int(pos);
 
             if self._first_sc == QStyle.SubControl.SC_SliderHandle:
                 if pos < self.second_position:
