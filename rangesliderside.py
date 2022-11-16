@@ -14,7 +14,7 @@ class RangeSlider(QWidget):
     sliderMoved = pyqtSignal(int,int);
 
 #TODO: somewhere the integer 0,1000000.. being passed from the initializer in maskeditor is being converted to float
-    def __init__(self, range:Tuple[int,int]=(1,8), rangeLimit=(0,10), parent=None):
+    def __init__(self, range:Tuple[int,int]=(1,8), rangeLimit=(0,10), tickCount=20, parent=None):
         super().__init__(parent)
 
         self.cursorIn = False;
@@ -30,11 +30,11 @@ class RangeSlider(QWidget):
         self._second_sc = None;
 
         self.opt = QStyleOptionSlider()
-        self.opt.minimum = rangeLimit[0]
-        self.opt.maximum = rangeLimit[1]
+        self.tickCount=tickCount
 
         self.setTickPosition(QSlider.TickPosition.TicksAbove)
-        self.setTickInterval(10)
+
+        self.setRangeLimit(rangeLimit[0],rangeLimit[1],emit=False);
 
         self.setSizePolicy(
             QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed, QSizePolicy.ControlType.Slider)
@@ -43,6 +43,8 @@ class RangeSlider(QWidget):
     def setRangeLimit(self, minimum: int, maximum: int, emit=True):
         self.opt.minimum = minimum
         self.opt.maximum = maximum
+        print(f"calculated tick interval: {max(int((self.opt.maximum-self.opt.minimum)/self.tickCount),0)}")
+        self.setTickInterval(max(int((self.opt.maximum-self.opt.minimum)/self.tickCount),0))
         if emit:
             self.rangeLimitChanged.emit(minimum,maximum);
 
@@ -95,15 +97,7 @@ class RangeSlider(QWidget):
         self.opt.subControls = QStyle.SubControl.SC_SliderGroove | QStyle.SubControl.SC_SliderTickmarks
 
         #   Draw GROOVE
-        groove_rect = self.style().subControlRect(
-            QStyle.ComplexControl.CC_Slider, self.opt, QStyle.SubControl.SC_SliderGroove
-        )
-        painter.setPen(QColor(80,80,80));
-        painter.setBrush(QColor(80,80,80));
-        groove_rect.adjust(0,int(groove_rect.height()/6),0,-int(groove_rect.height()/6));
-        painter.drawRect(groove_rect);
-        #self.style().drawComplexControl(QStyle.ComplexControl.CC_Slider, self.opt, painter)
-        #self.style().drawControl(QStyle.ControlElement.CE_ScrollBarSlider, self.opt, painter);
+        self.style().drawComplexControl(QStyle.ComplexControl.CC_Slider, self.opt, painter)
 
         #  Draw INTERVAL
 
@@ -112,7 +106,7 @@ class RangeSlider(QWidget):
         painter.setBrush(QBrush(color))
         painter.setPen(Qt.PenStyle.NoPen)
 
-        print(self.opt.minimum,self.first_position);
+        print(f"Slider minimum: {self.opt.minimum}, min value: {self.first_position}");
         self.opt.sliderPosition = max(self.opt.minimum,self.first_position);
         left_handle = (
             self.style()
@@ -127,7 +121,11 @@ class RangeSlider(QWidget):
 
 
 
-        # print(f"Groove Rect: {groove_rect}, Left handle x: {left_handle}, right handle x: {right_handle}");
+        groove_rect = self.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider, self.opt, QStyle.SubControl.SC_SliderGroove
+        )
+
+        print(f"Groove Rect: {groove_rect}, Left handle x: {left_handle}, right handle x: {right_handle}, my rect: {self.rect()}");
 
         selection = QRect(
             left_handle.right(),
@@ -135,7 +133,6 @@ class RangeSlider(QWidget):
             right_handle.left() - left_handle.right(),
             groove_rect.height(),
         ).adjusted(-1, 1, 1, -1)
-
         painter.drawRect(selection)
 
         # Draw first handle
@@ -143,11 +140,6 @@ class RangeSlider(QWidget):
         self.opt.subControls = QStyle.SubControl.SC_SliderHandle
         self.opt.sliderPosition = self.first_position
         self.style().drawComplexControl(QStyle.ComplexControl.CC_Slider, self.opt, painter)
-        
-        painter.setPen(QPen(Qt.GlobalColor.darkGray,1));
-        painter.setBrush(Qt.GlobalColor.gray);
-        painter.drawRect(left_handle);
-        painter.drawRect(right_handle);
 
         # Draw second handle
         self.opt.sliderPosition = self.second_position
@@ -208,8 +200,6 @@ class RangeSlider(QWidget):
             self.enterEvent();
         elif ev.type() == QEvent.Type.GraphicsSceneHoverLeave:
             self.leaveEvent();
-        # else:
-        #     print(QEvent.Type(ev.type()))
         return False;
 
     def updateCursor(self,pos=None):
