@@ -8,6 +8,8 @@ from typing import Tuple
 from numpy import positive
 from numpy.core.fromnumeric import shape
 
+
+#source code from https://stackoverflow.com/a/62665367/13682828 modified to work with pyqt instead of pyside
 class RangeSlider(QWidget):
     rangeLimitChanged = pyqtSignal(int,int)
     rangeChanged = pyqtSignal(int,int)
