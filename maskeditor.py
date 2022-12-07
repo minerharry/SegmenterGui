@@ -9,6 +9,9 @@ from PyQt6.QtCore import QFile, QLineF, QMarginsF, QPoint, QPointF, QRect, QRect
 from PyQt6.QtGui import QAction, QBitmap, QBrush, QCloseEvent, QColor, QCursor, QDoubleValidator, QFontMetrics, QGuiApplication, QIcon, QImage, QImageWriter, QIntValidator, QMouseEvent, QPainter, QPen, QPixmap, QShortcut, QKeySequence, QTextDocument, QTransform, QUndoCommand, QUndoStack, QValidator
 import numpy as np
 
+from watchdog.events import FileSystemEventHandler, FileSystemEvent
+from watchdog.observers import Observer
+
 import sys
 import os
 import shutil
@@ -288,7 +291,7 @@ class SegmenterStatusBar(QStatusBar): #TODO: add additional status & error messa
         self.errorWidget.setStyleSheet("QLabel {color : red;}");
         self.errorTimer = QTimer(self);
         self.errorTimer.setSingleShot(True);
-        self.errorTimer.timeout.connect(self.errorWidget.hide);
+        self.errorTimer.timeout.connect(self.clearError);
         self.errorLabel = '';
 
         self.cursorWidget = QLabel();
@@ -298,6 +301,12 @@ class SegmenterStatusBar(QStatusBar): #TODO: add additional status & error messa
 
         self.errorWidget.hide();
         self.cursorWidget.hide();
+
+    def clearError(self):
+        print("clearing error");
+        self.errorWidget.hide();
+        self.errorTimer.stop();
+        self.errorLabel = None;
 
     def showMessage(self, message: str, msecs: int=0) -> None:
         return super().showMessage(message, msecs=msecs)
@@ -311,16 +320,18 @@ class SegmenterStatusBar(QStatusBar): #TODO: add additional status & error messa
             self.cursorWidget.hide();
 
     def showErrorMessage(self,msg,timeout=None,label=None):
-        if msg is None or msg == "" and (not(label) or label == self.errorLabel):
-            self.errorWidget.hide();
-            self.errorTimer.stop();
-            self.errorLabel = None;
+        print("Error Received:",msg,timeout,label);
+        if (msg is None or msg == ""): #clear-error command, check if relevant
+            if (not(label) or label == self.errorLabel):
+                self.clearError();
             return;
         self.errorWidget.setText(f"Error: {msg}");
         self.errorWidget.show();
         self.errorLabel = label;
         if timeout:
             self.errorTimer.start(timeout);
+        else:
+            self.errorTimer.stop(); #ensure earlier timer doesn't override;
 
     def saveMessage(self):
         self.showMessage("Saving session...",3000)
@@ -1079,6 +1090,21 @@ class DataPane(QWidget,DataObject):
         self.exportPane.clearDir.connect(self.selector.changeImage);
         self.exportPane.exportActivated.connect(self.selector.export);
 
+class ImageDirectoryWatcher(FileSystemEventHandler,QObject):
+    directoryModified = pyqtSignal(FileSystemEvent);
+    directoryRemoved = pyqtSignal();
+
+    def on_any_event(self,event):
+        print("event happened:",event);
+        print("event type:",event.event_type);
+        # print("event properties:",{at:getattr(event,at) for at in dir(event)});
+        if (event.is_directory):
+            self.directoryRemoved.emit(event);
+        else:
+            self.directoryModified.emit(event);
+
+
+
 class ImageSelectorPane(QWidget,DataObject):
     error = pyqtSignal(str,int,str);
     directoryChanged = pyqtSignal(str,str); #image directory, mask directory
@@ -1129,6 +1155,11 @@ class ImageSelectorPane(QWidget,DataObject):
         self.list.selectionModel().currentChanged.connect(self.changeImage);
 
         self.exportDialog = QExportDialog(self);
+        self.observer = Observer();
+        self.observer.start();
+        self.watcher = ImageDirectoryWatcher();
+        self.watcher.directoryModified.connect(self.reloadImageDir);
+        self.watcher.directoryRemoved.connect(self.clearImageDir);
 
     def workingDirPopulated(self):
         return any(os.scandir(Defaults.workingDirectory));
@@ -1204,9 +1235,10 @@ class ImageSelectorPane(QWidget,DataObject):
 
 
     def getAllMaskFilePaths(self,includeModify=False): #should only be called if both mask and image directory selected
-        if not(self.imageDirChooser.dire):
+        if not(self.imageDirChooser.dire) or not(self.maskDirChooser.dire):
             print("Warning: attempting to get file paths without without proper directories");
             return [];
+        
         imagenames = self.model.stringList();
         workingMasks = list(filter(lambda x: x.endswith(tuple(Defaults.supportedMaskExts)),os.listdir(Defaults.workingDirectory)));
         originalMasks = list(filter(lambda x: x.lower().endswith(tuple(Defaults.supportedMaskExts)),os.listdir(self.maskDirChooser.dire))) if self.maskDirChooser.dire else [];
@@ -1237,6 +1269,37 @@ class ImageSelectorPane(QWidget,DataObject):
             
         return result;
 
+    def reloadImageDir(self,event:FileSystemEvent|None=None):
+        print("Image dir reloaded");
+        dire = self.imageDirChooser.dire;
+        if dire and os.path.exists(dire):
+            filtered = list(filter(lambda x: x.lower().endswith(tuple(Defaults.supportedImageExts)),os.listdir(dire)));
+            filtered.sort(key = lambda e: (len(e),e));
+            if any(filter(lambda x: x.lower().endswith('.nd'),os.listdir(dire))):
+                try:
+                    filtered = parsend.sorted_dir(filtered);
+                except Exception as e:
+                    print(e);
+            if filtered == self.model.stringList():
+                #no change
+                print("directory modified, no effect");
+                return;
+            else:
+                print(filtered,self.model.stringList());
+            
+            last_image = self.list.currentIndex().data();
+            self.model.setStringList(filtered);
+
+            index = filtered.index(last_image) if last_image in filtered else 0;
+            self.list.setCurrentIndex(self.model.index(index));
+        else:
+            self.model.setStringList([]);
+            self.observer.unschedule_all();
+
+    def clearImageDir(self,event:FileSystemEvent|None=None):
+        print("Image dir cleared on event:",event);
+        self.selectImageDir(None);
+
     def selectImageDir(self,dire,clear=True,emit=True,initialIndex=0): #TODO: fix image not reloading correctly
         if dire and not(os.path.exists(dire)):
             print(f"Error: somehow attempting to select invalid image directory {dire}; setting to None")
@@ -1255,11 +1318,21 @@ class ImageSelectorPane(QWidget,DataObject):
 
         else:
             self.model.setStringList([]);
+            self.observer.unschedule_all();
+
         if clear: 
             self.maskDirChooser.clearSelection(emit=False);
             self.clearWorkingDir();
+
         index = self.model.index(initialIndex)
         self.list.setCurrentIndex(index);
+
+        if dire:
+            print("observer scheduled");
+            self.observer.schedule(self.watcher,dire,recursive=False)
+        else:
+            self.observer.unschedule_all();
+
         if emit: self.directoryChanged.emit(dire,None);
         return index;
 
@@ -1348,8 +1421,6 @@ class DirectorySelector(QWidget):
     def __init__(self,title="Select Directory:",startingDirectory=None,parent=None,buttonText="Browse...",dialog=None,clearBtn = ""):
         super().__init__(parent=parent);
         self.createObjects(title,startingDirectory,dialog,buttonText,clearBtn);
-
-    
     
     def createObjects(self,title,dire,dialog,buttonText,clearBtn):
         self.dire = dire;
@@ -1378,7 +1449,6 @@ class DirectorySelector(QWidget):
         self.directoryChanged.connect(self.pathLabel.setText);
         self.directoryChanged.connect(self.pathLabel.setToolTip);
         self.browseButton.clicked.connect(lambda: self.checkDialog(self.selectDirectory));
-
 
 
     @pyqtSlot()
@@ -1964,8 +2034,8 @@ class QMainSegmentWindow(QMainWindow,DataObject):
 
     def tabletEvent(self, a0: QtGui.QTabletEvent) -> None:
         if a0.isPointerEvent() and a0.type() == QEvent.Type.TabletPress:
-            print(f"tablet event received: {a0}")
-            print(f"pointer type: {a0.pointerType()}")
+            # print(f"tablet event received: {a0}")
+            # print(f"pointer type: {a0.pointerType()}")
             a0.accept();
         return super().tabletEvent(a0)
 
@@ -1983,7 +2053,7 @@ class QMainSegmentWindow(QMainWindow,DataObject):
         self.shortcutsAction = QAction("Keyboard Shortcuts");
         self.exportAction = QAction("Export Masks");
         self.sessSaveAction = QAction("Save Session");
-        self.actions = [self.prevAction,
+        self.my_actions = [self.prevAction,
             self.nextAction,
             self.increaseAction,
             self.decreaseAction,
@@ -2035,11 +2105,10 @@ class QMainSegmentWindow(QMainWindow,DataObject):
         mbox.setDefaultButton(QMessageBox.StandardButton.Ok);
         mbox.setTextFormat(Qt.TextFormat.RichText);
         mbox.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction);
-        #mbox.setOpenExternalLinks(True);
         mbox.exec();
 
     def shortcuts(self):
-        shortcutList = [(action.text(),action.shortcut().toString()) for action in self.actions if action.shortcut()]
+        shortcutList = [(action.text(),action.shortcut().toString()) for action in self.my_actions if action.shortcut()]
         shortcutList += [("Toggle Draw Mode","Hold Ctrl/Shift"),("Hide Mask","Hold Space"),("Zoom In/Out","Ctrl+Scroll Up/Scroll Down"),("Scroll Left/Right", "Alt+Scroll Up/ Scroll Down")];
         QMessageBox.information(self,"Keyboard Shortcuts","\n".join(["{0}: {1}".format(name,key) for (name,key) in shortcutList]),QMessageBox.StandardButton.Ok,defaultButton=QMessageBox.StandardButton.Ok);
             
