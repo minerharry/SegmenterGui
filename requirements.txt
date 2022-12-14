@@ -5,3 +5,4 @@ pyqt6-sip==13.4.0
 numpy
 matplotlib
 scikit-image
+watchdog
