@@ -82,29 +82,54 @@ else:
 
 class DataObject: #basic implementation of object data loading/saving
 
-    def loadState(self,data,**kwargs):
+    def loadState(self,data,stack="root",**kwargs):
+        errors = [];
         if data == {}:
-            return;
-        for name,datum in data['children'].items():
-            if (hasattr(self,name)):
-                child = getattr(self,name)
-                if isinstance(child,DataObject):
-                    child.loadState(datum);
+            return errors;
+        if 'children' in data:
+            for name,datum in data['children'].items():
+                if (hasattr(self,name)):
+                    child = getattr(self,name)
+                    if isinstance(child,DataObject):
+                        errors.extend(child.loadState(datum,stack = stack+"."+name));
+                    else:
+                        print(f"Data state load error: named child {name} not an instance of DataObject");
                 else:
-                    print(f"Data state load error: named child {name} not an instance of DataObject");
-            else:
-                print(f"Data state load error: named child {name} not part of class {self}");
-        self.loadData(data['self'],**kwargs);
+                    print(f"Data state load error: named child {name} not part of class {self}");
+        selfData = None;
+        if 'self' in data:
+            selfData = data['self'];
+        try:
+            self.loadData(selfData,**kwargs);
+        except Exception as e:
+            errors.append([stack,str(type(e)),repr(e),repr(e.with_traceback(None))]);
+        return errors;
         
 
     def loadData(self,data): #loads data for self; can be left blank if no data for that class
         pass;
 
-    def getStateData(self):
+    def getStateData(self,stack="root"): #error format: list of [obj_stack,type,error] errors;
         children = {};
+        errors = [];
         for child,chObj in inspect.getmembers(self,lambda x: isinstance(x,DataObject)):
-            children[child] = DataObject.getStateData(chObj);
-        return {'self':self.getSaveData(),'children':children};
+            children[child],ch_errors = DataObject.getStateData(chObj,stack=stack+"."+child);
+            errors.extend(ch_errors);
+        selfdata = None;
+        error = None;
+        try:
+            selfdata = self.getSaveData();
+        except Exception as e:
+            error = [stack,str(type(e)),repr(e),repr(e.with_traceback(None))];
+            errors.append(error);
+        out_dict = {};
+        if selfdata:
+            out_dict['self'] = selfdata;
+        if children:
+            out_dict['children'] = children;
+        if error:
+            out_dict['save error'] = error[3];
+        return [out_dict,errors];
 
     def getSaveData(self): #returns state data for self; can be left blank if no data for that class
         return {};
@@ -616,8 +641,6 @@ class MaskContainer(QWidget,DataObject):
             self.imageRanged.emit(*self.imRange);
         self.imageDataRead.emit(self.imData);
         return self.rescaleAndPixmapData(external=False);
-        # else:
-        #     return QPixmap(self.imData.shape[1],self.imData.shape[0]);
 
     def rescaleAndPixmapData(self,external=True):
         print("rescaling")
