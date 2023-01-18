@@ -43,13 +43,14 @@ class Defaults:
     drawButtonsLabel = "Draw Mode";
     workingDirectory = "working_masks/";
     sessionFileName = "session_dat.json";
-    supportedImageExts = [".bmp",".png",".jpg",".PBM",".jpeg",".tif",".sld",".aim",".al3d",".gel",".am",".amiramesh",".grey",".hx",".labels",".cif",".img",".hdr",".sif",".afi",".svs",".htd",".pnl",".avi",".arf",".exp",".sdt",".1sc",".pic",".raw",".xml",".scn",".ims",".cr2",".crw",".ch5",".c01",".dib",".dv",".r3d",".dcm",".dicom",".v",".eps",".epsi",".ps",".flex",".mea",".res",".tiff",".fits",".dm3",".dm4",".dm2",".gif",".naf",".his",".vms",".i2i",".ics",".ids",".seq",".ipw",".hed",".mod",".leff",".obf",".msr",".xdce",".frm",".inr",".ipl",".ipm",".dat",".par",".jp2",".jpk",".jpx",".xv",".bip",".fli",".lei",".lif",".scn",".sxm",".l2d",".lim",".stk"]; 
+    supportedImageExts = [".bmp",".png",".jpg",".pbm",".jpeg",".tif",".sld",".aim",".al3d",".gel",".am",".amiramesh",".grey",".hx",".labels",".cif",".img",".hdr",".sif",".afi",".svs",".htd",".pnl",".avi",".arf",".exp",".sdt",".1sc",".pic",".raw",".xml",".scn",".ims",".cr2",".crw",".ch5",".c01",".dib",".dv",".r3d",".dcm",".dicom",".v",".eps",".epsi",".ps",".flex",".mea",".res",".tiff",".fits",".dm3",".dm4",".dm2",".gif",".naf",".his",".vms",".i2i",".ics",".ids",".seq",".ipw",".hed",".mod",".leff",".obf",".msr",".xdce",".frm",".inr",".ipl",".ipm",".dat",".par",".jp2",".jpk",".jpx",".xv",".bip",".fli",".lei",".lif",".scn",".sxm",".l2d",".lim",".stk"]; 
     supportedMaskExts = supportedImageExts; #TODO: filter list by image formats and not just supported formats
     autosaveTime = 60*1000; #milliseconds
     exportedFlagFile = "export.flag";
     attemptMaskResize = False;
     penPreview = True;
-    previewWidth = 1.2;
+    exactPreviewWidth = 0.6;
+    circlePreviewWidth = exactPreviewWidth*5;
     allowMaskCreation = True;
     defaultMaskFormat = ".bmp";
     adjustSigFigs = 4;
@@ -179,11 +180,11 @@ class MaskSegmenter(QSplitter,DataObject):
         self.data = DataPane();
         self.statusBar:SegmenterStatusBar = statusBar;
 
-        # self.layout = QHBoxLayout();
-        # self.layout.addWidget(self.data);
-        # self.layout.addWidget(self.editor);
-        # self.layout.setStretch(1, 2)
-        # self.setLayout(self.layout);
+        # self.lay = QHBoxLayout();
+        # self.lay.addWidget(self.data);
+        # self.lay.addWidget(self.editor);
+        # self.lay.setStretch(1, 2)
+        # self.setLayout(self.lay);
         self.addWidget(self.data);
         self.addWidget(self.editor);
         self.setHandleWidth(20);
@@ -455,7 +456,7 @@ class EditorPane(QWidget,DataObject):
         self.toolbar.adjustDialog.pixelRangeChanged.connect(self.maskView.maskContainer.setOverrideRescale);
         self.toolbar.adjustDialog.rangeReset.connect(self.maskView.maskContainer.resetOverride);
         self.toolbar.zoomReset.clicked.connect(self.maskView.fitImageInView);
-        self.toolbar.previewCheck.clicked.connect(lambda x: self.maskView.setPreviewVisible(not x));
+        self.toolbar.previewCheck.clicked.connect(lambda x: self.maskView.setPreviewsVisible(not x));
         self.maskView.maskContainer.imageRanged.connect(self.toolbar.adjustDialog.setPixelRange);
         self.maskView.maskContainer.imageDataRead.connect(self.toolbar.adjustDialog.loadImageData);
 
@@ -479,25 +480,70 @@ class MaskedImageView(QGraphicsView,DataObject):
         self.maskContainer = MaskContainer();
         self.proxy = self.scene.addWidget(self.maskContainer);
         self.maskContainer.sizeChanged.connect(self.proxyChanged);
-        self.maskContainer.mask.drawBetweenPixels.connect(self.drawBetweenPixels);
+        self.maskContainer.mask.cursorMove.connect(self.updatePreviews);
+        self.maskContainer.mask.draggingStart.connect(self.previewSwitchDragging)
+        self.maskContainer.mask.draggingEnd.connect(self.previewSwitchHovering)
         self.setScene(self.scene);
         self.tabletErasing.connect(self.maskContainer.mask.setTabletErasing)
         self.setMouseTracking(True);
         if Defaults.penPreview:
             self.diameter = Defaults.defaultBrushSize;
-            self.previewThickness = Defaults.previewWidth;
+            self.exactPreviewThickness = Defaults.exactPreviewWidth;
+            self.circlePreviewThickness = Defaults.circlePreviewWidth;
             self.backPath = None;
             self.forePath = None;
             self.pathsEnabled = True;
+            
+            backpen = QPen(QColor(255,255,255),self.circlePreviewThickness,Qt.PenStyle.SolidLine);
+            backpen.setCosmetic(True);
+            self.preview = self.scene.addEllipse(300,50,30,30,backpen);
+            self.preview.setVisible(False);
+            self.preview.setZValue(50);
+
+            pen = QPen(QColor(0,0,0),self.circlePreviewThickness,Qt.PenStyle.DotLine);
+            pen.setCosmetic(True);
+            self.backPreview = self.scene.addEllipse(QRectF(),pen);
+            self.backPreview.setZValue(50);
+            self.backPreview.setParentItem(self.preview);
+            self.backPreview.setRect(QRectF(0,0,1,1));
+            self.circlePreviewEnabled = False
+
+            self.previewsVisible = True;
+
+    def previewSwitchDragging(self):
+        # print("preview switched to dragging mode")
+        if Defaults.penPreview:
+            self.setExactPreviewVisible(False);
+            self.setCirclePreviewVisible(True);
     
-    def setPreviewVisible(self,visible):
-        if (Defaults.penPreview):
+    def previewSwitchHovering(self):
+        # print("preview switched to hovering mode")
+        if Defaults.penPreview:
+            self.setExactPreviewVisible(True);
+            self.setCirclePreviewVisible(False);
+
+    def setPreviewsVisible(self,visible):
+        self.previewsVisible = visible;
+        self.updatePreviews(-1);
+
+    def setExactPreviewVisible(self,visible):
+        if Defaults.penPreview:
             self.pathsEnabled = visible;
             self.drawBetweenPixels(-1);
+
+    def setCirclePreviewVisible(self,visible):
+        if Defaults.penPreview:
+            self.circlePreviewEnabled = visible;
+            self.updateCirclePreview(-1);
 
     @pyqtSlot()
     def proxyChanged(self):
         self.scene.setSceneRect(self.proxy.rect());
+
+    def updatePreviews(self,position):
+        if Defaults.penPreview:
+            self.drawBetweenPixels(position);
+            self.updateCirclePreview(position);
 
     def drawBetweenPixels(self,position):
         if position == -1:
@@ -505,7 +551,7 @@ class MaskedImageView(QGraphicsView,DataObject):
             # print(f"position1: {position}");
             
             
-        if not position or not self.pathsEnabled:
+        if not position or not self.pathsEnabled or not self.previewsVisible:
             self.backPath.setVisible(False);
             self.forePath.setVisible(False);
             #NOTE: leaving persistent variables (diameter, lastpos) because the paths still exists in their previous locations
@@ -516,13 +562,13 @@ class MaskedImageView(QGraphicsView,DataObject):
         top = self.proxy.geometry().top()
         pixel_width = self.proxy.geometry().width()/self.maskContainer.mask.pixlayer.width();
         pixel_height = self.proxy.geometry().height()/self.maskContainer.mask.pixlayer.height();
-        print("units per pixel width:",pixel_width);
-        print("pixel bounds:",(self.proxy.geometry().width(),self.proxy.geometry().height()))
-        print("pixmap size:",(self.maskContainer.mask.pixlayer.width(),self.maskContainer.mask.pixlayer.height()));
+        # print("units per pixel width:",pixel_width);
+        # print("pixel bounds:",(self.proxy.geometry().width(),self.proxy.geometry().height()))
+        # print("pixmap size:",(self.maskContainer.mask.pixlayer.width(),self.maskContainer.mask.pixlayer.height()));
         
         adjusted_position = QPoint(int((position.x()-left)/pixel_width),int((position.y()-top)/pixel_height));
-        print(f"position: {position}");
-        print(f"adjusted position: {adjusted_position}");
+        # print(f"position: {position}");
+        # print(f"adjusted position: {adjusted_position}");
 
         self.maskContainer.mask.setAdjustedDrawPoint([adjusted_position.x()*pixel_width + left,adjusted_position.y()*pixel_height + top]);
         # print(self.diameter);
@@ -532,8 +578,8 @@ class MaskedImageView(QGraphicsView,DataObject):
             path = QPainterPath(QPointF(*outline[-1]));
             for point in outline:
                 path.lineTo(*point);
-            self.backPath:QGraphicsPathItem = self.scene.addPath(path,QPen(QColor(255,255,255),self.previewThickness/self.scaleFactor));
-            self.forePath:QGraphicsPathItem = self.scene.addPath(path,QPen(QColor(0,0,0),self.previewThickness/self.scaleFactor,Qt.PenStyle.DashLine));
+            self.backPath:QGraphicsPathItem = self.scene.addPath(path,QPen(QColor(255,255,255),self.exactPreviewThickness/self.scaleFactor));
+            self.forePath:QGraphicsPathItem = self.scene.addPath(path,QPen(QColor(0,0,0),self.exactPreviewThickness/self.scaleFactor,Qt.PenStyle.DotLine));
             self.maskContainer.update();
         else:
             if self.drawnPathDiameter != self.diameter:
@@ -552,7 +598,7 @@ class MaskedImageView(QGraphicsView,DataObject):
                 self.maskContainer.update();
                 # print(self.backPath.path().pointAtPercent(0));
 
-            width = self.previewThickness/math.sqrt(self.scaleFactor);
+            width = self.exactPreviewThickness/math.sqrt(self.scaleFactor);
             pen = self.backPath.pen()
             pen.setWidthF(width);
             self.backPath.setPen(pen);
@@ -573,36 +619,34 @@ class MaskedImageView(QGraphicsView,DataObject):
         #     self.backBetween.setRect(adjusted_position.x(),pixel_height,10*pixel_width,10*pixel_height);
         #     self.foreBetween.setRect(adjusted_position.x(),adjusted_position.y(),10*pixel_width,10*pixel_height);
         
-        
-    # def updatePreview(self): #TODO: fix ghost lines; #TODO: make visible on all colors w/ black&white
-    #     if self.mousePos:
-    #         pos = self.mapToScene(self.mousePos);
-    #         margin = self.previewThickness + 20;
-    #         origin = self.preview.rect().adjusted(-margin,-margin,margin,margin);
-    #         self.preview.setVisible(False); #-self.proxy.rect().topLeft().x() -self.proxy.rect().topLeft().y()
-    #         self.preview.prepareGeometryChange();
-    #         newRect = QRectF(pos.x()-self.diameter/2,pos.y()-self.diameter/2,self.diameter,self.diameter);
-    #         self.preview.setRect(newRect)
-    #         self.backPreview.setVisible(False); #-self.proxy.rect().topLeft().x() -self.proxy.rect().topLeft().y()
-    #         self.backPreview.prepareGeometryChange();
-    #         self.backPreview.setRect(newRect);
-    #         self.backPreview.update();
-    #         self.preview.update();
-    #         self.repaint(origin.toRect());
-    #         self.repaint(newRect.adjusted(-margin,-margin,margin,margin).toRect());
-    #         self.maskContainer.update();
-    #         #penWidth = 0.5/self.scaleFactor;
-    #         #print(penWidth);
-    #         #self.preview.pen().setWidth(0.5/self.scaleFactor);
-    #     else:
-    #         self.backPreview.setVisible(False);
-    #         self.preview.setVisible(False);
+    def updateCirclePreview(self,position):
+        if position == -1:
+            position = self.mapToScene(self.mapFromGlobal(QCursor.pos()))
+
+        if not position or not self.circlePreviewEnabled or not self.previewsVisible:
+            self.backPreview.setVisible(False);
+            self.preview.setVisible(False);
+            return;
+        else:
+            self.backPreview.setVisible(True);
+            self.preview.setVisible(True);
+
+        margin = self.circlePreviewThickness + 20;
+        origin = self.preview.rect().adjusted(-margin,-margin,margin,margin);
+        self.preview.setVisible(True); 
+        newRect = QRectF(position.x()-self.diameter/2*0.95,position.y()-self.diameter/2*0.95,self.diameter,self.diameter);
+        self.preview.setRect(newRect)
+        self.backPreview.setVisible(True);
+        self.backPreview.setRect(newRect);
+        self.repaint(origin.toRect());
+        self.repaint(newRect.adjusted(-margin,-margin,margin,margin).toRect());            
 
     def setPreviewDiameter(self,size):
         self.diameter=size;
-        self.drawBetweenPixels(-1)
+        self.updatePreviews(-1);
 
     def wheelEvent(self,event):
+        self.cursorUpdate.emit(self.mapToScene(event.position().toPoint()));
         if (Qt.KeyboardModifier.ControlModifier in event.modifiers()):
             angle = event.angleDelta().y();
             factor = 1 + (1 if angle > 0 else -1)*self.wheel_factor;
@@ -610,22 +654,15 @@ class MaskedImageView(QGraphicsView,DataObject):
         else:
             super().wheelEvent(event);
         if Defaults.penPreview:
-            self.drawBetweenPixels(-1)
-            # self.updatePreview();
+            self.updatePreviews(-1);
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         if Defaults.penPreview:
             self.mousePos = None;
-            self.drawBetweenPixels(-1);
+            self.updatePreviews(-1);
             self.cursorUpdate.emit(self.mapToScene(event.position().toPoint()));
         super().mouseMoveEvent(event);
 
-    # def leaveEvent(self, a0: QtCore.QEvent) -> None:
-    #     if Defaults.penPreview:
-    #         self.mousePos = None;
-    #         self.updatePreview();
-    #         self.cursorUpdate.emit(QPointF());
-    #     super().leaveEvent(a0);
 
     @pyqtSlot(float)
     def zoom(self,factor,anchor=None):
@@ -699,18 +736,17 @@ class MaskContainer(QWidget,DataObject):
             if image is not None:
                 pmap = self.readPixmap(image);
                 self.image.setPixmap(pmap);
-
             else:
                 self.imData = None;
                 self.image.setPixmap(QPixmap(Defaults.blankSize));
                 self.image.pixmap().fill(Defaults.blankColor);
         self.imName = image;
-        print("pixmap loaded")
+        # print("pixmap loaded")
         self.image.setFixedSize(self.image.pixmap().size());
         self.setFixedSize(self.image.size());
-        print("label pmap size:",self.image.pixmap().size())
-        print(self.image.geometry())
-        print(self.image.size());
+        # print("label pmap size:",self.image.pixmap().size())
+        # print(self.image.geometry())
+        # print(self.image.size());
         if mask and os.path.exists(mask):
             bmap = self.readBitmap(mask,rsize=(self.image.size() if Defaults.attemptMaskResize else None));
             print("creating mask from file")
@@ -766,9 +802,9 @@ class MaskContainer(QWidget,DataObject):
         else:
             data = rescale_intensity(self.imData,self.imRange,type);
         im = QImage(data.data, shape[1], shape[0], bytesPerLine, format);
-        print("im size:",im.size());
+        # print("im size:",im.size());
         out_pix = QPixmap.fromImage(im);
-        print("pix size:",out_pix.size())
+        # print("pix size:",out_pix.size())
         if external:
             self.rescaleEnd.emit();
         return out_pix;
@@ -788,11 +824,22 @@ class MaskContainer(QWidget,DataObject):
             self.imageRanged.emit(*self.imRange);
 
     def readBitmap(self,map,rsize=None):
-        bitData = None;
         if Defaults.loadMode == LoadMode.biof:
             bitData = bf.load_image(map);
         elif Defaults.loadMode == LoadMode.skimage:
             bitData = imread(map);
+            bitData = np.invert(bitData);
+        else:
+            raise NotImplementedError(f"Load mode {Defaults.loadMode} not supported");
+
+        print(bitData);
+        print(np.max(bitData));
+        print(np.min(bitData));
+        vals,counts = np.unique(bitData, return_counts=True)
+        index = np.argmax(counts)
+        print(vals[index]);
+        print("inverted:",vals[index]==np.max(bitData));
+
         if (rsize):
             print("resizing")
             if isinstance(rsize,QSize):
@@ -813,7 +860,7 @@ class ImageDisplayer(QWidget): #using this instead of QLabel prevents it from sc
 
     def setPixmap(self,pmap):
         self.image = pmap;
-        print("pixmap set")
+        # print("pixmap set")
         super().update();
 
     def pixmap(self):
@@ -827,7 +874,9 @@ class ImageDisplayer(QWidget): #using this instead of QLabel prevents it from sc
 class ImageMask(ImageDisplayer,DataObject):
     maskUpdate = pyqtSignal(); #whenever mask is changed or a stroke is completed; saves to working directory
     error = pyqtSignal(str,int,str);
-    drawBetweenPixels = pyqtSignal(object); #[QPointF, None] are the options
+    cursorMove = pyqtSignal(object); #[QPointF, None] are the options
+    draggingStart = pyqtSignal();
+    draggingEnd = pyqtSignal();
 
     def __init__(self,parent):
         super().__init__(parent);
@@ -849,7 +898,6 @@ class ImageMask(ImageDisplayer,DataObject):
         self.pen = QPen(Defaults.defaultFG,Defaults.defaultBrushSize,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap,Qt.PenJoinStyle.RoundJoin);
         self.brush = QBrush(Defaults.defaultFG);
         self.drawMode = DrawMode.INCLUDE;
-        self.bitcolors = [Defaults.bmapFG,Defaults.bmapBG];
         self.bitlayer = QBitmap(initSize);
         self.bitlayer.clear();
         self.pixlayer = QPixmap(initSize);
@@ -906,34 +954,37 @@ class ImageMask(ImageDisplayer,DataObject):
 
     def mouseMoveEvent(self, e, dot=False):
         self.adjustDrawPoint = None
-        self.drawBetweenPixels.emit(e.position());
+        self.cursorMove.emit(e.position());
 
         if not(Qt.MouseButton.LeftButton in e.buttons()): #TODO: Test compatibility tablet drawing
+            self.lastPos = None;
             return;
 
         #print(e.position())
-        if not(dot) and self.lastPos is None: # First event.
+        if not(dot) and self.lastPos is None: # First event while moving
             self.lastPos = e.position();
+            self.draggingStart.emit();
+            # print("first mousemove event");
             return # Ignore the first time.
 
-        colors = [self.fgColor,self.bgColor];
-        inversion = -1 if self.tabletErasing else 0;
+        colors = self.getPixColors(invert=self.tabletErasing);
+        bitcolors = self.getBitColors(invert=self.tabletErasing);
         ##invert colors TODO: make sure this wild west inversion doesn't interfere with anything else lol
 
         bitpainter = QPainter(self.bitlayer)
         bitpainter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source);
         if dot:
-            self.brush.setColor(self.bitcolors[inversion + self.drawMode]);
+            self.brush.setColor(bitcolors[self.drawMode]);
             bitpainter.setBrush(self.brush)
             if self.adjustDrawPoint:
-                bitpainter.setPen(self.bitcolors[inversion + self.drawMode]);
+                bitpainter.setPen(bitcolors[self.drawMode]);
                 self.drawPoints = circleutil.getCircleFill(self.adjustDrawPoint,self.pen.widthF()/2);
                 bitpainter.drawPoints(QPolygonF([QPointF(*p) for p in self.drawPoints]));
             else:
                 bitpainter.setPen(Qt.PenStyle.NoPen)
                 bitpainter.drawEllipse(e.position(),self.pen.widthF()/2,self.pen.widthF()/2);
         else:
-            self.pen.setColor(self.bitcolors[inversion + self.drawMode]);
+            self.pen.setColor(bitcolors[self.drawMode]);
             bitpainter.setPen(self.pen);
             bitpainter.drawLine(self.lastPos, e.position())
         bitpainter.end()
@@ -942,30 +993,30 @@ class ImageMask(ImageDisplayer,DataObject):
         pixpainter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source);
 
         if dot:
-            self.brush.setColor(colors[inversion + self.drawMode]);
+            self.brush.setColor(colors[self.drawMode]);
             pixpainter.setBrush(self.brush)
             if self.adjustDrawPoint:
-                pixpainter.setPen(colors[inversion + self.drawMode]);
+                pixpainter.setPen(colors[self.drawMode]);
                 pixpainter.drawPoints(QPolygonF([QPointF(*p) for p in self.drawPoints])); #draw points would have been generated in earlier block
             else:
                 pixpainter.setPen(Qt.PenStyle.NoPen)
                 pixpainter.drawEllipse(e.position(),self.pen.widthF()/2,self.pen.widthF()/2);
             #print(f"circle drawn, at position {e.position()} of radii {self.pen.widthF()}");
         else:
-            self.pen.setColor(colors[inversion + self.drawMode]);
+            self.pen.setColor(colors[self.drawMode]);
             pixpainter.setPen(self.pen);
             pixpainter.drawLine(self.lastPos, e.position())
         pixpainter.end();
 
         # Update the origin for next time.
-        self.lastPos = e.position();
+        if not(dot):
+            self.lastPos = e.position();
         self.update();
 
 
     def leaveEvent(self,ev: QEvent):
-        self.drawBetweenPixels.emit(None)
-
-
+        self.cursorMove.emit(None)
+        self.draggingEnd.emit();
 
     def mousePressEvent(self, ev: QMouseEvent) -> None:
         self.pressPos = ev.position();
@@ -974,19 +1025,27 @@ class ImageMask(ImageDisplayer,DataObject):
     def mouseReleaseEvent(self, e): #guaranteed called whenever mouse released after clicking on pane
         self.lastPos = None;
         self.maskUpdate.emit();
+        self.draggingEnd.emit();
         self.pushUndoStack();
+
+    def getPixColors(self,invert=False):
+        return [self.fgColor,self.bgColor][::-1 if invert else 1];
+
+    def getBitColors(self,invert=False):
+        return [Defaults.bmapBG,Defaults.bmapFG][::-1 if invert else 1];
 
     def reloadPixLayer(self): 
         print("pix layer reloaded");
         self.pixlayer = QPixmap(self.bitlayer.size());
         self.blankLayer = QPixmap(self.pixlayer.size());
         self.blankLayer.fill(Defaults.blankColor);
-        self.pixlayer.fill(self.fgColor)
+        bg,fg = self.getPixColors();
+        self.pixlayer.fill(fg)
         pixptr = QPainter(self.pixlayer);
         pixptr.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source);
         pixptr.setBackgroundMode(Qt.BGMode.OpaqueMode);
-        pixptr.setBackground(self.fgColor);
-        pixptr.setPen(self.bgColor);
+        pixptr.setBackground(fg);
+        pixptr.setPen(bg);
         pixptr.drawPixmap(0,0,self.bitlayer);
         pixptr.end();
         self.update();
@@ -1028,7 +1087,7 @@ class ImageMask(ImageDisplayer,DataObject):
             names = os.path.splitext(self.fileName);
             if (names[1][1:].lower() not in QImageWriter.supportedImageFormats()):
                 saveName = names[0] + Defaults.defaultMaskFormat;
-            self.bitlayer.save(Defaults.workingDirectory+saveName);
+            self.bitlayer.save(Defaults.workingDirectory+saveName); #NOTE: SAVES "inverted" according to windows preview - don't let it confuse you!
             if (os.path.exists(Defaults.exportedFlagFile)):
                 os.remove(Defaults.exportedFlagFile)
         else:
@@ -1043,7 +1102,7 @@ class MaskToolbar(QWidget,DataObject): #TODO: Fix second slider handle seeming t
         self.createObjects();
     
     def createObjects(self):
-        self.layout = QGridLayout()
+        self.lay = QGridLayout()
         
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed);
         self.slider = EditableSlider(label="Brush Size");
@@ -1059,24 +1118,24 @@ class MaskToolbar(QWidget,DataObject): #TODO: Fix second slider handle seeming t
         self.revertButton = QPushButton("Revert to Original")
         self.revertButton.clicked.connect(self.revert);
         self.maskRevert.connect(self.adjustDialog.reset);
-        self.layout.addWidget(self.slider,0,0,-1,1);
-        self.layout.addWidget(self.drawButtons,0,1,-1,1);
-        self.layout.addWidget(self.maskCheck,0,2,1,1);
-        self.layout.addWidget(self.previewCheck,1,2,-1,1);
-        self.layout.addWidget(self.iButtons,0,3,1,2);
-        self.layout.addWidget(self.zButtons,1,3,-1,1);
-        self.layout.addWidget(self.revertButton,1,4,-1,1);
-        self.layout.addWidget(self.zoomReset,0,5,1,1);
-        self.layout.addWidget(self.adjustButton,1,5,-1,1);
-        # self.layout.a
+        self.lay.addWidget(self.slider,0,0,-1,1);
+        self.lay.addWidget(self.drawButtons,0,1,-1,1);
+        self.lay.addWidget(self.maskCheck,0,2,1,1);
+        self.lay.addWidget(self.previewCheck,1,2,-1,1);
+        self.lay.addWidget(self.iButtons,0,3,1,2);
+        self.lay.addWidget(self.zButtons,1,3,-1,1);
+        self.lay.addWidget(self.revertButton,1,4,-1,1);
+        self.lay.addWidget(self.zoomReset,0,5,1,1);
+        self.lay.addWidget(self.adjustButton,1,5,-1,1);
+        # self.lay.a
 
-        self.layout.addWidget(None,0,7);
-        self.layout.setColumnStretch(7,10);
-        self.layout.setVerticalSpacing(0);
-        self.layout.setSpacing(0);
-        self.layout.setContentsMargins(QMargins(0,0,0,0));
+        self.lay.addWidget(None,0,7);
+        self.lay.setColumnStretch(7,10);
+        self.lay.setVerticalSpacing(0);
+        self.lay.setSpacing(0);
+        self.lay.setContentsMargins(QMargins(0,0,0,0));
 
-        self.setLayout(self.layout);
+        self.setLayout(self.lay);
 
     def revert(self): #TODO: Potentially move into image selector pane, check if there are changes on current image
         confirmBox = QMessageBox(QMessageBox.Icon.Warning,"Revert Mask","Clear changes and revert to the original mask?");
@@ -1204,14 +1263,14 @@ class NextPrevButtons(QWidget,DataObject):
         self.createObjects();
     
     def createObjects(self):
-        self.layout = QHBoxLayout();
+        self.lay = QHBoxLayout();
         self.bButton = QPushButton("Previous");
         self.nButton = QPushButton("Next");
-        self.layout.addWidget(self.bButton);
-        self.layout.addWidget(self.nButton);
+        self.lay.addWidget(self.bButton);
+        self.lay.addWidget(self.nButton);
         self.bButton.clicked.connect(self.handleBButton);
         self.nButton.clicked.connect(self.handleNButton);
-        self.setLayout(self.layout);
+        self.setLayout(self.lay);
 
     @pyqtSlot()
     def handleBButton(self):
@@ -1240,11 +1299,11 @@ class ZoomButtons(QWidget,DataObject):
         self.zInButton.clicked.connect(lambda: self.handleClick(1))
         self.zOutButton.clicked.connect(lambda: self.handleClick(-1))
 
-        self.layout = QHBoxLayout();
-        self.layout.addWidget(self.zInButton);
-        self.layout.addWidget(self.zOutButton);
-        #self.layout.addWidget(self.zoomDisplay);
-        self.setLayout(self.layout);
+        self.lay = QHBoxLayout();
+        self.lay.addWidget(self.zInButton);
+        self.lay.addWidget(self.zOutButton);
+        #self.lay.addWidget(self.zoomDisplay);
+        self.setLayout(self.lay);
 
     def handleClick(self,direction):
         self.zoomed.emit(1+direction*self.zoomFactor);
@@ -1266,11 +1325,11 @@ class DataPane(QWidget,DataObject):
         self.selector = ImageSelectorPane(self.exportPane);
 
 
-        self.layout = QVBoxLayout();
-        self.layout.addWidget(self.selector);
-        self.layout.addWidget(self.exportPane);
+        self.lay = QVBoxLayout();
+        self.lay.addWidget(self.selector);
+        self.lay.addWidget(self.exportPane);
 
-        self.setLayout(self.layout);
+        self.setLayout(self.lay);
 
         self.exportPane.clearDir.connect(self.selector.clearWorkingDir);
         self.exportPane.clearDir.connect(self.selector.changeImage);
@@ -1330,12 +1389,12 @@ class ImageSelectorPane(QWidget,DataObject):
         self.list.setModel(self.model);
         
         
-        self.layout = QVBoxLayout();
-        self.layout.addWidget(self.imageDirChooser);
-        self.layout.addWidget(self.list);
-        self.layout.addWidget(self.maskDirChooser);
+        self.lay = QVBoxLayout();
+        self.lay.addWidget(self.imageDirChooser);
+        self.lay.addWidget(self.list);
+        self.lay.addWidget(self.maskDirChooser);
 
-        self.setLayout(self.layout);
+        self.setLayout(self.lay);
         self.imageDirChooser.directoryChanged.connect(self.selectImageDir);
         self.maskDirChooser.directoryChanged.connect(self.selectMaskDir);
         self.list.selectionModel().currentChanged.connect(self.changeImage);
@@ -1409,13 +1468,15 @@ class ImageSelectorPane(QWidget,DataObject):
             imName = self.getSelectedImageName()
             baseName = os.path.splitext(imName)[0];
             workingFiles = os.listdir(Defaults.workingDirectory);
-            workingMasks = list(filter(lambda x: x.startswith(baseName+".") and x.endswith(tuple(Defaults.supportedMaskExts)),workingFiles));
+            workingMasks = list(filter(lambda x: x.startswith(baseName+".") and x.lower().endswith(tuple(Defaults.supportedMaskExts)),workingFiles));
             maskName = (Defaults.workingDirectory + workingMasks[0]) if len(workingMasks) > 0 else None;
             if maskName and os.path.exists(maskName):
                 os.remove(maskName);
                 if (os.path.exists(Defaults.exportedFlagFile)):
                     os.remove(Defaults.exportedFlagFile);
                 self.changeImage();
+            # else:
+            #     print(maskName,os.path.exists(maskName));
                 
 
 
@@ -1426,7 +1487,7 @@ class ImageSelectorPane(QWidget,DataObject):
             return [];
         
         imagenames = self.model.stringList();
-        workingMasks = list(filter(lambda x: x.endswith(tuple(Defaults.supportedMaskExts)),os.listdir(Defaults.workingDirectory)));
+        workingMasks = list(filter(lambda x: x.lower().endswith(tuple(Defaults.supportedMaskExts)),os.listdir(Defaults.workingDirectory)));
         originalMasks = list(filter(lambda x: x.lower().endswith(tuple(Defaults.supportedMaskExts)),os.listdir(self.maskDirChooser.dire))) if self.maskDirChooser.dire else [];
 
         print(f"getting all masks... lengths: {len(imagenames)}, {len(workingMasks)}, {len(originalMasks)}")
@@ -1620,21 +1681,21 @@ class DirectorySelector(QWidget):
         self.browseButton = QPushButton(buttonText);
         self.browseButton.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Fixed,QSizePolicy.Policy.Fixed))
         self.pathLabel = ElideLabel();
-        self.layout = QGridLayout();
-        self.layout.addWidget(self.title,0,0);
-        self.layout.addWidget(self.browseButton,0,1);
+        self.lay = QGridLayout();
+        self.lay.addWidget(self.title,0,0);
+        self.lay.addWidget(self.browseButton,0,1);
         if clearBtn:
             self.clearButton = QPushButton(clearBtn);
             self.clearButton.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Fixed,QSizePolicy.Policy.Fixed));
             self.clearButton.clicked.connect(lambda: self.checkDialog(self.clearSelection));
-            self.layout.addWidget(self.clearButton,0,2);
-        self.layout.addWidget(self.pathLabel,1,0,1,-1);
+            self.lay.addWidget(self.clearButton,0,2);
+        self.lay.addWidget(self.pathLabel,1,0,1,-1);
 
         self.fileDialog = QFileDialog(self);
         self.fileDialog.setFileMode(QFileDialog.FileMode.Directory);
         self.fileDialog.setOption(QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.ReadOnly);
 
-        self.setLayout(self.layout)
+        self.setLayout(self.lay)
         self.directoryChanged.connect(self.pathLabel.setText);
         self.directoryChanged.connect(self.pathLabel.setToolTip);
         self.browseButton.clicked.connect(lambda: self.checkDialog(self.selectDirectory));
@@ -1691,18 +1752,18 @@ class MaskUnexportedDialog(QDialog):
 
     def createObjects(self,desc,bNames):
         self.setWindowTitle("Warning: Unexported Masks");
-        self.layout = QGridLayout();
+        self.lay = QGridLayout();
 
         self.descLabel = QLabel(desc);
         self.noExportButton = QPushButton(bNames[0]);
         self.exportButton = QPushButton(bNames[1]);
         self.cancelButton = QPushButton("Cancel");
 
-        self.layout.addWidget(self.descLabel,0,0,1,3);
-        self.layout.addWidget(self.noExportButton,1,0)
-        self.layout.addWidget(self.exportButton,1,1)
-        self.layout.addWidget(self.cancelButton,1,2);
-        self.setLayout(self.layout);
+        self.lay.addWidget(self.descLabel,0,0,1,3);
+        self.lay.addWidget(self.noExportButton,1,0)
+        self.lay.addWidget(self.exportButton,1,1)
+        self.lay.addWidget(self.cancelButton,1,2);
+        self.setLayout(self.lay);
 
         self.noExportButton.clicked.connect(self.accept);
         self.exportButton.clicked.connect(self.exportAndAccept);
@@ -1806,7 +1867,7 @@ class AdjustmentDialog(QDialog,DataObject): #TODO: Make it clear that pixel inte
         #TODO: Figure out how to add a help button
         self.setWhatsThis("Use the slider or text inputs to tell the program what the minimum and maximum values of the input image should be, from 0-1. This will adjust the brightness and contrast of the image accordingly. Additionally, provided is a histogram of the image intensities (0-1) to illustrate where most of the image lies in terms of pixel intensity.")
         self.tempState = None;
-        self.layout = QGridLayout(self);
+        self.lay = QGridLayout(self);
         self.histogram = HistogramAdjustWidget();
         self.range = EditableRange();
         self.persistenceCheck = QCheckBox("Use for all images in folder");
@@ -1818,14 +1879,14 @@ class AdjustmentDialog(QDialog,DataObject): #TODO: Make it clear that pixel inte
         self.applied = False #specifically for opening and closing the dialog, nothing else
         self.dataChangedSinceApply = False
     
-        self.layout.addWidget(self.histogram,0,0,1,-1);
-        self.layout.addWidget(self.range,1,0,1,-1);
-        self.layout.addWidget(self.persistenceCheck,2,0,1,3);
-        self.layout.addWidget(self.resetButton,2,3,1,3);
-        self.layout.addWidget(self.confirmButton,3,0,1,2);
-        self.layout.addWidget(self.previewButton,3,2,1,2);
-        self.layout.addWidget(self.cancelButton,3,4,1,2);
-        self.setLayout(self.layout)
+        self.lay.addWidget(self.histogram,0,0,1,-1);
+        self.lay.addWidget(self.range,1,0,1,-1);
+        self.lay.addWidget(self.persistenceCheck,2,0,1,3);
+        self.lay.addWidget(self.resetButton,2,3,1,3);
+        self.lay.addWidget(self.confirmButton,3,0,1,2);
+        self.lay.addWidget(self.previewButton,3,2,1,2);
+        self.lay.addWidget(self.cancelButton,3,4,1,2);
+        self.setLayout(self.lay)
 
         self.originalRange = None;
         self.initialized = False;
@@ -1980,9 +2041,9 @@ class HistogramAdjustWidget(QWidget,DataObject,RangeComponent):
         self.slider = RangeSlider(rangeLimit=(0,Defaults.histSliderPrecision));
         self.slider.rangeChanged.connect(lambda min,max: self.rangeChanged.emit(*self.getRange((min,max)),self));
         self.view = SliderChartView(self.chart,self.slider);
-        self.layout = QVBoxLayout();
-        self.layout.addWidget(self.view);
-        self.setLayout(self.layout);
+        self.lay = QVBoxLayout();
+        self.lay.addWidget(self.view);
+        self.setLayout(self.lay);
 
     def getRange(self,range=None):
         if not range:
@@ -2054,7 +2115,7 @@ class EditableRange(QWidget,DataObject,RangeComponent):
         self.createObjects(names,values);
 
     def createObjects(self,names,values):
-        self.layout = QGridLayout(self);
+        self.lay = QGridLayout(self);
         
         self.minWidget = QWidget();
         self.minWidget.setLayout(QHBoxLayout());
@@ -2075,9 +2136,9 @@ class EditableRange(QWidget,DataObject,RangeComponent):
         self.minBox.editingFinished.connect(lambda: self.rangeChanged.emit(*self.range(),self))
         self.maxBox.editingFinished.connect(lambda: self.rangeChanged.emit(*self.range(),self))
         
-        self.layout.addWidget(self.minWidget,0,0);
-        self.layout.addWidget(self.maxWidget,0,1);
-        self.setLayout(self.layout);
+        self.lay.addWidget(self.minWidget,0,0);
+        self.lay.addWidget(self.maxWidget,0,1);
+        self.setLayout(self.lay);
 
     def range(self):
         return (float(self.minBox.text()),float(self.maxBox.text()));
@@ -2149,16 +2210,16 @@ class ExportPanel(QWidget,DataObject):
         self.createObjects();
 
     def createObjects(self):
-        self.layout = QGridLayout(self);
+        self.lay = QGridLayout(self);
         self.exportButton = QPushButton("Export Changes");
         self.clearButton = QPushButton("Clear All Changes");
         
         self.exportButton.clicked.connect(self.exportActivated.emit);
         self.clearButton.clicked.connect(self.clearChanges);
 
-        self.layout.addWidget(self.exportButton,1,0,1,2);
-        self.layout.addWidget(self.clearButton,1,2,1,2);
-        self.setLayout(self.layout);
+        self.lay.addWidget(self.exportButton,1,0,1,2);
+        self.lay.addWidget(self.clearButton,1,2,1,2);
+        self.setLayout(self.lay);
         if Defaults.convertUnassignedMasks:
             self.typeLabel = QLabel("Default Mask Export Type:") #TODO: Make more clear that this only affects newly created files
             self.typeSelector = QComboBox(self);
@@ -2169,8 +2230,8 @@ class ExportPanel(QWidget,DataObject):
             self.typeSelector.setInsertPolicy(QComboBox.InsertPolicy.NoInsert);
             self.typeSelector.addItems(Defaults.supportedMaskExts)
             self.typeSelector.setValidator(QStringListValidator(Defaults.supportedMaskExts))
-            self.layout.addWidget(self.typeLabel,0,0,1,2);
-            self.layout.addWidget(self.typeSelector,0,2,1,1);
+            self.lay.addWidget(self.typeLabel,0,0,1,2);
+            self.lay.addWidget(self.typeSelector,0,2,1,1);
 
     def maskExt(self):
         if Defaults.convertUnassignedMasks:
