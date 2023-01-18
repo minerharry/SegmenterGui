@@ -9,6 +9,8 @@ pyqt6 = "*"
 python-bioformats = "*"
 scikit-image = "*"
 pyqt6-charts = "*"
+json-tricks = "*"
+pybresenham = "*"
 
 [dev-packages]
 
