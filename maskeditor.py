@@ -1103,34 +1103,67 @@ class MaskToolbar(QWidget,DataObject): #TODO: Fix second slider handle seeming t
     
     def createObjects(self):
         self.lay = QGridLayout()
+
+        self.gridbutton_margins = QMargins(8,8,8,8);
         
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed);
+        
         self.slider = EditableSlider(label="Brush Size");
+        
         self.drawButtons = DualToggleButtons();
+        
         self.maskCheck = QCheckBox("Hide Mask");
+        
         self.previewCheck = QCheckBox("Hide Cursor");
+        
         self.iButtons = NextPrevButtons();
+        
         self.zButtons = ZoomButtons()
+        
+        zoomWidget = QWidget();
+        zoomWidget.setLayout(QHBoxLayout());
         self.zoomReset = QPushButton("Reset Zoom");
+        zoomWidget.layout().addWidget(self.zoomReset)
+        
+        adjustWidget = QWidget();
+        adjustWidget.setLayout(QHBoxLayout());
         self.adjustButton = QPushButton("Adjust Brightness")
+        adjustWidget.layout().addWidget(self.adjustButton);
         self.adjustDialog = AdjustmentDialog();
         self.adjustButton.clicked.connect(self.adjustDialog.exec);
+        
+        revertWidget = QWidget();
+        revertWidget.setLayout(QHBoxLayout());
         self.revertButton = QPushButton("Revert to Original")
+        revertWidget.layout().addWidget(self.revertButton);
+        
         self.revertButton.clicked.connect(self.revert);
         self.maskRevert.connect(self.adjustDialog.reset);
+        
         self.lay.addWidget(self.slider,0,0,-1,1);
-        self.lay.addWidget(self.drawButtons,0,1,-1,1);
-        self.lay.addWidget(self.maskCheck,0,2,1,1);
-        self.lay.addWidget(self.previewCheck,1,2,-1,1);
-        self.lay.addWidget(self.iButtons,0,3,1,2);
-        self.lay.addWidget(self.zButtons,1,3,-1,1);
-        self.lay.addWidget(self.revertButton,1,4,-1,1);
-        self.lay.addWidget(self.zoomReset,0,5,1,1);
-        self.lay.addWidget(self.adjustButton,1,5,-1,1);
+        self.lay.addWidget(self.drawButtons,0,1,-1,1,Qt.AlignmentFlag.AlignCenter);
+        self.lay.addWidget(self.maskCheck,0,2,1,1,Qt.AlignmentFlag.AlignBottom);
+        self.lay.addWidget(self.previewCheck,1,2,-1,1,Qt.AlignmentFlag.AlignTop);
+        self.lay.addWidget(self.iButtons,0,3,1,2,Qt.AlignmentFlag.AlignBottom);
+        self.lay.addWidget(self.zButtons,1,3,-1,1,Qt.AlignmentFlag.AlignTop);
+        self.lay.addWidget(revertWidget,1,4,-1,1,Qt.AlignmentFlag.AlignTop);
+        self.lay.addWidget(zoomWidget,0,5,1,1,Qt.AlignmentFlag.AlignBottom);
+        self.lay.addWidget(adjustWidget,1,5,-1,1,Qt.AlignmentFlag.AlignTop);
+
+        self.drawButtons.setContentsMargins(self.gridbutton_margins)
+        # self.maskCheck.setContentsMargins(self.gridbutton_margins)
+        # self.previewCheck.setContentsMargins(self.gridbutton_margins)
+        # self.iButtons.setContentsMargins(self.gridbutton_margins)
+        # self.zButtons.setContentsMargins(QMargins(0,0,0,0))
+        zoomWidget.layout().setContentsMargins(self.gridbutton_margins)
+        adjustWidget.layout().setContentsMargins(self.gridbutton_margins)
+        revertWidget.layout().setContentsMargins(self.gridbutton_margins)
         # self.lay.a
 
         self.lay.addWidget(None,0,7);
+        self.lay.addWidget(None,2,1,-1,1); #below all widgets but the slider
         self.lay.setColumnStretch(7,10);
+        self.lay.setRowStretch(2,10);
         self.lay.setVerticalSpacing(0);
         self.lay.setSpacing(0);
         self.lay.setContentsMargins(QMargins(0,0,0,0));
