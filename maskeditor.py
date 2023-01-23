@@ -1987,7 +1987,7 @@ class AdjustmentDialog(QDialog,DataObject): #TODO: Make it clear that pixel inte
         print("opening adjustment dialog...")
         self.applied = False;
         self.saveState();
-        QWhatsThis.enterWhatsThisMode();
+        # QWhatsThis.enterWhatsThisMode();
         return super().exec();
 
     @pyqtSlot()
