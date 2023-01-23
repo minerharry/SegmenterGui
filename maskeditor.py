@@ -3,7 +3,7 @@ from to_precision import std_notation
 from rangesliderside import RangeSlider
 from PyQt6 import QtGui
 from PyQt6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
-from PyQt6.QtWidgets import QAbstractItemView, QAbstractSlider, QApplication, QCheckBox, QComboBox, QCompleter, QDialog, QFileDialog, QGraphicsPathItem, QGraphicsScene, QGraphicsView, QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit, QListView, QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QSlider, QSplitter, QStatusBar, QStyle, QStyleOptionFrame, QToolButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QAbstractItemView, QAbstractSlider, QApplication, QCheckBox, QComboBox, QCompleter, QDialog, QFileDialog, QGraphicsPathItem, QGraphicsScene, QGraphicsView, QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit, QListView, QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QSlider, QSplitter, QStatusBar, QStyle, QStyleOptionFrame, QToolButton, QVBoxLayout, QWidget, QWhatsThis
 from PyQt6 import QtCore
 from PyQt6.QtCore import QFile, QLineF, QMargins, QMarginsF, QPoint, QPointF, QRect, QRectF, QSignalMapper, QSize, QStringListModel, QTimer, Qt, pyqtSignal, pyqtSlot, QObject, QEvent, QUrl
 from PyQt6.QtGui import QAction, QBitmap, QBrush, QCloseEvent, QColor, QCursor, QDoubleValidator, QFontMetrics, QGuiApplication, QIcon, QImage, QImageWriter, QIntValidator, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QPolygon, QPolygonF, QShortcut, QKeySequence, QTextDocument, QTransform, QUndoCommand, QUndoStack, QValidator
@@ -85,12 +85,14 @@ else:
 class DataObject: #basic implementation of object data loading/saving
 
     def loadState(self,data,stack="root",**kwargs):
+        print("loading state for object",stack);
         errors = [];
         if data == {}:
             return errors;
         if 'children' in data:
             for name,datum in data['children'].items():
                 if (hasattr(self,name)):
+                    # print("loading child state:",name);
                     child = getattr(self,name)
                     if isinstance(child,DataObject):
                         errors.extend(child.loadState(datum,stack = stack+"."+name));
@@ -211,6 +213,7 @@ class MaskSegmenter(QSplitter,DataObject):
         self.data.selector.list.installEventFilter(self);
         self.editor.toolbar.maskCheck.installEventFilter(self);
         self.editor.toolbar.adjustButton.installEventFilter(self);
+        self.editor.toolbar.exactCheck.installEventFilter(self);
         self.data.selector.maskDirChooser.browseButton.installEventFilter(self);
         self.data.selector.imageDirChooser.browseButton.installEventFilter(self);
         self.data.exportPane.exportButton.installEventFilter(self);
@@ -282,38 +285,47 @@ class MaskSegmenter(QSplitter,DataObject):
         
 
     def eventFilter(self,obj,ev):
-        if ev.type() == QEvent.Type.KeyPress:
+        out = False;
+        if ev.type() in [QEvent.Type.KeyPress,QEvent.Type.ShortcutOverride]:
             print("key event - filter");
             if (Qt.KeyboardModifier.ControlModifier in ev.modifiers()):
                 self.editor.toolbar.drawButtons.setValue(1,store=True);
                 self.ctrl = True;
                 print("control pressed");
-                return True;
+                out = True;
             if (Qt.KeyboardModifier.ShiftModifier in ev.modifiers()):
                 self.editor.toolbar.drawButtons.setValue(0,store=True);
                 self.shift = True;
                 print("shift pressed");
-                return True;
+                out = True;
+            if (ev.key() == Qt.Key.Key_Tab):
+                self.editor.toolbar.exactCheck.setChecked(True);
+                print("tab pressed");
+                out = True
             if (ev.key() == Qt.Key.Key_Space):# and not ev.isAutoRepeat()):
                 self.editor.toolbar.maskCheck.setChecked(True);
                 print("space pressed");
-                return True;
+                out = True;
         if ev.type() == QEvent.Type.KeyRelease:
             if (Qt.KeyboardModifier.ControlModifier not in ev.modifiers() and self.ctrl): 
                 self.editor.toolbar.drawButtons.restoreValue();
                 print("ctrl released")
                 self.ctrl = False;
-                return True;
+                out = True;
             if (Qt.KeyboardModifier.ShiftModifier not in ev.modifiers() and self.shift):
                 self.editor.toolbar.drawButtons.restoreValue();
                 print("shift released")
                 self.shift = False;
-                return True;
+                out = True;
             if (ev.key() == Qt.Key.Key_Space and not ev.isAutoRepeat()):
                 self.editor.toolbar.maskCheck.setChecked(False);
                 print("space released");
-                return True;
-        return False;       
+                out = True;
+            if (ev.key() == Qt.Key.Key_Tab and not ev.isAutoRepeat()):
+                self.editor.toolbar.exactCheck.setChecked(False);
+                print("tab released");
+                out = True
+        return out;       
 
 class SegmenterStatusBar(QStatusBar): #TODO: add additional status & error messages as needed
     def __init__(self):
@@ -456,7 +468,9 @@ class EditorPane(QWidget,DataObject):
         self.toolbar.adjustDialog.pixelRangeChanged.connect(self.maskView.maskContainer.setOverrideRescale);
         self.toolbar.adjustDialog.rangeReset.connect(self.maskView.maskContainer.resetOverride);
         self.toolbar.zoomReset.clicked.connect(self.maskView.fitImageInView);
-        self.toolbar.previewCheck.clicked.connect(lambda x: self.maskView.setPreviewsVisible(not x));
+        if Defaults.penPreview:
+            self.toolbar.previewCheck.clicked.connect(lambda x: self.maskView.setPreviewsVisible(not x));
+            self.toolbar.exactCheck.toggled.connect(self.maskView.setExactCursorMode);
         self.maskView.maskContainer.imageRanged.connect(self.toolbar.adjustDialog.setPixelRange);
         self.maskView.maskContainer.imageDataRead.connect(self.toolbar.adjustDialog.loadImageData);
 
@@ -475,15 +489,15 @@ class MaskedImageView(QGraphicsView,DataObject):
         self.scaleFactor = 1;
 
     def createObjects(self):
-        self.scene = QGraphicsScene();
+        self.graphicsScene = QGraphicsScene();
         self.scaleFactor = 1;
         self.maskContainer = MaskContainer();
-        self.proxy = self.scene.addWidget(self.maskContainer);
+        self.proxy = self.graphicsScene.addWidget(self.maskContainer);
         self.maskContainer.sizeChanged.connect(self.proxyChanged);
         self.maskContainer.mask.cursorMove.connect(self.updatePreviews);
         self.maskContainer.mask.draggingStart.connect(self.previewSwitchDragging)
         self.maskContainer.mask.draggingEnd.connect(self.previewSwitchHovering)
-        self.setScene(self.scene);
+        self.setScene(self.graphicsScene);
         self.tabletErasing.connect(self.maskContainer.mask.setTabletErasing)
         self.setMouseTracking(True);
         if Defaults.penPreview:
@@ -496,19 +510,27 @@ class MaskedImageView(QGraphicsView,DataObject):
             
             backpen = QPen(QColor(255,255,255),self.circlePreviewThickness,Qt.PenStyle.SolidLine);
             backpen.setCosmetic(True);
-            self.preview = self.scene.addEllipse(300,50,30,30,backpen);
+            self.preview = self.graphicsScene.addEllipse(300,50,30,30,backpen);
             self.preview.setVisible(False);
             self.preview.setZValue(50);
 
             pen = QPen(QColor(0,0,0),self.circlePreviewThickness,Qt.PenStyle.DotLine);
             pen.setCosmetic(True);
-            self.backPreview = self.scene.addEllipse(QRectF(),pen);
+            self.backPreview = self.graphicsScene.addEllipse(QRectF(),pen);
             self.backPreview.setZValue(50);
             self.backPreview.setParentItem(self.preview);
             self.backPreview.setRect(QRectF(0,0,1,1));
             self.circlePreviewEnabled = False
 
             self.previewsVisible = True;
+            self.setExactCursorMode(False);
+            
+
+    def setExactCursorMode(self,mode:bool):
+        if Defaults.penPreview:
+            self.exactMode = mode;
+            self.setExactPreviewVisible(mode);
+            self.setCirclePreviewVisible(not mode);
 
     def previewSwitchDragging(self):
         # print("preview switched to dragging mode")
@@ -518,7 +540,7 @@ class MaskedImageView(QGraphicsView,DataObject):
     
     def previewSwitchHovering(self):
         # print("preview switched to hovering mode")
-        if Defaults.penPreview:
+        if Defaults.penPreview and self.exactMode:
             self.setExactPreviewVisible(True);
             self.setCirclePreviewVisible(False);
 
@@ -538,7 +560,7 @@ class MaskedImageView(QGraphicsView,DataObject):
 
     @pyqtSlot()
     def proxyChanged(self):
-        self.scene.setSceneRect(self.proxy.rect());
+        self.graphicsScene.setSceneRect(self.proxy.rect());
 
     def updatePreviews(self,position):
         if Defaults.penPreview:
@@ -552,8 +574,9 @@ class MaskedImageView(QGraphicsView,DataObject):
             
             
         if not position or not self.pathsEnabled or not self.previewsVisible:
-            self.backPath.setVisible(False);
-            self.forePath.setVisible(False);
+            if self.backPath is not None and self.forePath is not None:
+                self.backPath.setVisible(False);
+                self.forePath.setVisible(False);
             #NOTE: leaving persistent variables (diameter, lastpos) because the paths still exists in their previous locations
             return
 
@@ -578,8 +601,8 @@ class MaskedImageView(QGraphicsView,DataObject):
             path = QPainterPath(QPointF(*outline[-1]));
             for point in outline:
                 path.lineTo(*point);
-            self.backPath:QGraphicsPathItem = self.scene.addPath(path,QPen(QColor(255,255,255),self.exactPreviewThickness/self.scaleFactor));
-            self.forePath:QGraphicsPathItem = self.scene.addPath(path,QPen(QColor(0,0,0),self.exactPreviewThickness/self.scaleFactor,Qt.PenStyle.DotLine));
+            self.backPath:QGraphicsPathItem = self.graphicsScene.addPath(path,QPen(QColor(255,255,255),self.exactPreviewThickness/self.scaleFactor));
+            self.forePath:QGraphicsPathItem = self.graphicsScene.addPath(path,QPen(QColor(0,0,0),self.exactPreviewThickness/self.scaleFactor,Qt.PenStyle.DotLine));
             self.maskContainer.update();
         else:
             if self.drawnPathDiameter != self.diameter:
@@ -613,8 +636,8 @@ class MaskedImageView(QGraphicsView,DataObject):
 
         # if not self.backBetween:
         #     print(f"drawing line at {(adjusted_position.x()*pixel_width,adjusted_position.y()*pixel_height,10*pixel_width,2*pixel_height)}");
-        #     self.backBetween = self.scene.addRect(adjusted_position.x(),adjusted_position.y(),10*pixel_width,10*pixel_height,QPen(QColor(255,255,255),0.2));
-        #     self.foreBetween = self.scene.addRect(adjusted_position.x(),adjusted_position.y(),10*pixel_width,10*pixel_height,QPen(QColor(0,0,0),0.2,Qt.PenStyle.DashLine));
+        #     self.backBetween = self.graphicsScene.addRect(adjusted_position.x(),adjusted_position.y(),10*pixel_width,10*pixel_height,QPen(QColor(255,255,255),0.2));
+        #     self.foreBetween = self.graphicsScene.addRect(adjusted_position.x(),adjusted_position.y(),10*pixel_width,10*pixel_height,QPen(QColor(0,0,0),0.2,Qt.PenStyle.DashLine));
         # else:
         #     self.backBetween.setRect(adjusted_position.x(),pixel_height,10*pixel_width,10*pixel_height);
         #     self.foreBetween.setRect(adjusted_position.x(),adjusted_position.y(),10*pixel_width,10*pixel_height);
@@ -640,6 +663,8 @@ class MaskedImageView(QGraphicsView,DataObject):
         self.backPreview.setRect(newRect);
         self.repaint(origin.toRect());
         self.repaint(newRect.adjusted(-margin,-margin,margin,margin).toRect());            
+        self.scene().update();
+        self.update();
 
     def setPreviewDiameter(self,size):
         self.diameter=size;
@@ -655,6 +680,8 @@ class MaskedImageView(QGraphicsView,DataObject):
             super().wheelEvent(event);
         if Defaults.penPreview:
             self.updatePreviews(-1);
+            # print("wheely\n");
+            # self.repaint() #since the start and end positions are farther away just repaint the whole thing lol
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         if Defaults.penPreview:
@@ -776,10 +803,11 @@ class MaskContainer(QWidget,DataObject):
         elif Defaults.loadMode == LoadMode.skimage:
             self.imData = imread(image);
         self.imData = rescale_intensity(self.imData,in_range='dtype',out_range=(0.0,1.0));
-        if rintensity:
-            self.imRange = (np.min(self.imData),np.max(self.imData));
-            self.imageRanged.emit(*self.imRange);
         self.imageDataRead.emit(self.imData);
+        if rintensity:
+            self.imRange = (max(np.min(self.imData),0),np.max(self.imData));
+            print("image ranged:",self.imRange);
+            self.imageRanged.emit(*self.imRange);
         return self.rescaleAndPixmapData(external=False);
 
     def rescaleAndPixmapData(self,external=True):
@@ -1114,7 +1142,9 @@ class MaskToolbar(QWidget,DataObject): #TODO: Fix second slider handle seeming t
         
         self.maskCheck = QCheckBox("Hide Mask");
         
-        self.previewCheck = QCheckBox("Hide Cursor");
+        if Defaults.penPreview:
+            self.previewCheck = QCheckBox("Hide Cursor");
+            self.exactCheck = QCheckBox("Exact Cursor");
         
         self.iButtons = NextPrevButtons();
         
@@ -1142,8 +1172,13 @@ class MaskToolbar(QWidget,DataObject): #TODO: Fix second slider handle seeming t
         
         self.lay.addWidget(self.slider,0,0,-1,1);
         self.lay.addWidget(self.drawButtons,0,1,-1,1,Qt.AlignmentFlag.AlignCenter);
-        self.lay.addWidget(self.maskCheck,0,2,1,1,Qt.AlignmentFlag.AlignBottom);
-        self.lay.addWidget(self.previewCheck,1,2,-1,1,Qt.AlignmentFlag.AlignTop);
+        
+        if Defaults.penPreview:
+            self.lay.addWidget(self.maskCheck,0,2,1,1,Qt.AlignmentFlag.AlignBottom);
+            self.lay.addWidget(self.previewCheck,1,2,1,1,Qt.AlignmentFlag.AlignVCenter);
+            self.lay.addWidget(self.exactCheck,2,2,1,1,Qt.AlignmentFlag.AlignTop);
+        else:
+            self.lay.addWidget(self.maskCheck,0,2,-1,1,Qt.AlignmentFlag.AlignCenter);
         self.lay.addWidget(self.iButtons,0,3,1,2,Qt.AlignmentFlag.AlignBottom);
         self.lay.addWidget(self.zButtons,1,3,-1,1,Qt.AlignmentFlag.AlignTop);
         self.lay.addWidget(revertWidget,1,4,-1,1,Qt.AlignmentFlag.AlignTop);
@@ -1151,10 +1186,6 @@ class MaskToolbar(QWidget,DataObject): #TODO: Fix second slider handle seeming t
         self.lay.addWidget(adjustWidget,1,5,-1,1,Qt.AlignmentFlag.AlignTop);
 
         self.drawButtons.setContentsMargins(self.gridbutton_margins)
-        # self.maskCheck.setContentsMargins(self.gridbutton_margins)
-        # self.previewCheck.setContentsMargins(self.gridbutton_margins)
-        # self.iButtons.setContentsMargins(self.gridbutton_margins)
-        # self.zButtons.setContentsMargins(QMargins(0,0,0,0))
         zoomWidget.layout().setContentsMargins(self.gridbutton_margins)
         adjustWidget.layout().setContentsMargins(self.gridbutton_margins)
         revertWidget.layout().setContentsMargins(self.gridbutton_margins)
@@ -1956,6 +1987,7 @@ class AdjustmentDialog(QDialog,DataObject): #TODO: Make it clear that pixel inte
         print("opening adjustment dialog...")
         self.applied = False;
         self.saveState();
+        QWhatsThis.enterWhatsThisMode();
         return super().exec();
 
     @pyqtSlot()
@@ -1977,10 +2009,14 @@ class AdjustmentDialog(QDialog,DataObject): #TODO: Make it clear that pixel inte
             self.pixelRangeChanged.emit(None,None);
 
     def saveState(self):
-        self.tempState = self.getStateData();
+        print("state saved");
+        self.tempState,errors = self.getStateData();
 
     def revertState(self):
-        self.loadState(self.tempState,apply=self.applied);
+        print("state reverted");
+        print(self.tempState);
+        errors = self.loadState(self.tempState,stack="temp.AdjustmentDialog",apply=self.applied);
+        # print(errors);
 
     def persistent(self):
         return self.persistenceCheck.isChecked();
@@ -1994,6 +2030,7 @@ class AdjustmentDialog(QDialog,DataObject): #TODO: Make it clear that pixel inte
 
     def setPixelRange(self,min,max): #only called by externals
         self.originalRange = (min,max);
+        self.histogram.setXRange(min,max);
         if (not(self.persistent())):
             self._setPixelRange(min,max);
 
@@ -2031,12 +2068,16 @@ class HistogramAdjustWidget(QWidget,DataObject,RangeComponent):
         for x,y in zip(bins,hist):
             self.line.append(QPointF(x,y));
         if range is None:
-            print("Warning: no range provided to histogram, recalculating...")
             range = (np.min(bins),np.max(bins));
+            print("Warning: no range provided to histogram, recalculating... calculated range:",range)
+
         else:
-            print("range provided")
+            print("range provided:",range)
         self.xAxis.setRange(*range);
         self.yAxis.setRange(np.min(hist),np.max(hist));
+
+    def setXRange(self,min,max):
+        self.xAxis.setRange(min,max);
 
     def setRange(self,min,max):
         print(f"input range set: {min},{max}")
@@ -2044,7 +2085,8 @@ class HistogramAdjustWidget(QWidget,DataObject,RangeComponent):
         width = self.slider.max()-smin;
         xMin = self.xAxis.min();
         xWidth = self.xAxis.max() - xMin;
-        newRange = [((pt-xMin)//xWidth*width+smin) for pt in [min,max]];
+        print("smin:",smin,"width:",width,"xMin:",xMin,"xMax:",self.xAxis.max(),"xWidth:",xWidth)
+        newRange = [int(((pt-xMin)/xWidth)*width+smin) for pt in [min,max]];
         print(f"adjusted range: {newRange}");
         self.slider.setRange(*newRange,emit=False);
         self.view.updateGraphClip();
@@ -2093,6 +2135,7 @@ class HistogramAdjustWidget(QWidget,DataObject,RangeComponent):
         return super().resizeEvent(a0)
 
     def loadData(self, data):
+        print("histogram data loaded");
         self.slider.setRange(*data,emit=False);
     
     def getSaveData(self):
@@ -2130,8 +2173,12 @@ class SliderChartView(QChartView):
     def updateGraphClip(self):
         plotArea:QRectF = self.chart().plotArea();
         range = self.slider.max()-self.slider.min()
-        leftProportion = (self.slider.start()-self.slider.min())/(range);
-        rightProportion = (self.slider.end()-self.slider.min())/(range);
+        # print(range);
+        # print(self.slider.start(),self.slider.end());
+        leftProportion = max((self.slider.start()-self.slider.min())/(range),0);
+        rightProportion = min((self.slider.end()-self.slider.min())/(range),1);
+        # print("Chart clip left:",leftProportion);
+        # print("Chart clip right:",rightProportion)
         leftPos = leftProportion * plotArea.width() + plotArea.left();
         rightPos = rightProportion * plotArea.width() + plotArea.left();
 
@@ -2390,7 +2437,7 @@ class QMainSegmentWindow(QMainWindow,DataObject):
 
     def shortcuts(self):
         shortcutList = [(action.text(),action.shortcut().toString()) for action in self.my_actions if action.shortcut()]
-        shortcutList += [("Toggle Draw Mode","Hold Ctrl/Shift"),("Hide Mask","Hold Space"),("Zoom In/Out","Ctrl+Scroll Up/Scroll Down"),("Scroll Left/Right", "Alt+Scroll Up/ Scroll Down")];
+        shortcutList += [("Toggle Draw Mode","Hold Ctrl/Shift"),("Hide Mask","Hold Space")] + ([("Enable Exact Cursor","Hold Tab")] if Defaults.penPreview else []) + [("Zoom In/Out","Ctrl+Scroll Up/Scroll Down"),("Scroll Left/Right", "Alt+Scroll Up/ Scroll Down")];
         QMessageBox.information(self,"Keyboard Shortcuts","\n".join(["{0}: {1}".format(name,key) for (name,key) in shortcutList]),QMessageBox.StandardButton.Ok,defaultButton=QMessageBox.StandardButton.Ok);
             
     def closeEvent(self, a0: QCloseEvent) -> None:
