@@ -279,51 +279,51 @@ class MaskSegmenter(QSplitter,DataObject):
         a0.ignore();
 
     def event(self,ev):
-        if ev.type() == QEvent.Type.KeyPress:
-            print("key event - segmenter");
+        # if ev.type() == QEvent.Type.KeyPress:
+        #     print("key event - segmenter");
         return super().event(ev);
         
 
     def eventFilter(self,obj,ev):
         out = False;
         if ev.type() in [QEvent.Type.KeyPress,QEvent.Type.ShortcutOverride]:
-            print("key event - filter");
+            # print("key event - filter");
             if (Qt.KeyboardModifier.ControlModifier in ev.modifiers()):
                 self.editor.toolbar.drawButtons.setValue(1,store=True);
                 self.ctrl = True;
-                print("control pressed");
+                # print("control pressed");
                 out = True;
             if (Qt.KeyboardModifier.ShiftModifier in ev.modifiers()):
                 self.editor.toolbar.drawButtons.setValue(0,store=True);
                 self.shift = True;
-                print("shift pressed");
+                # print("shift pressed");
                 out = True;
             if (ev.key() == Qt.Key.Key_Tab):
                 self.editor.toolbar.exactCheck.setChecked(True);
-                print("tab pressed");
+                # print("tab pressed");
                 out = True
             if (ev.key() == Qt.Key.Key_Space):# and not ev.isAutoRepeat()):
                 self.editor.toolbar.maskCheck.setChecked(True);
-                print("space pressed");
+                # print("space pressed");
                 out = True;
         if ev.type() == QEvent.Type.KeyRelease:
             if (Qt.KeyboardModifier.ControlModifier not in ev.modifiers() and self.ctrl): 
                 self.editor.toolbar.drawButtons.restoreValue();
-                print("ctrl released")
+                # print("ctrl released")
                 self.ctrl = False;
                 out = True;
             if (Qt.KeyboardModifier.ShiftModifier not in ev.modifiers() and self.shift):
                 self.editor.toolbar.drawButtons.restoreValue();
-                print("shift released")
+                # print("shift released")
                 self.shift = False;
                 out = True;
             if (ev.key() == Qt.Key.Key_Space and not ev.isAutoRepeat()):
                 self.editor.toolbar.maskCheck.setChecked(False);
-                print("space released");
+                # print("space released");
                 out = True;
             if (ev.key() == Qt.Key.Key_Tab and not ev.isAutoRepeat()):
                 self.editor.toolbar.exactCheck.setChecked(False);
-                print("tab released");
+                # print("tab released");
                 out = True
         return out;       
 
@@ -1580,7 +1580,7 @@ class ImageSelectorPane(QWidget,DataObject):
             
         return result;
 
-    def reloadImageDir(self,event:FileSystemEvent|None=None):
+    def reloadImageDir(self,event:Union[FileSystemEvent,None]=None):
         print("Image dir reloaded");
         dire = self.imageDirChooser.dire;
         if dire and os.path.exists(dire):
@@ -1607,7 +1607,7 @@ class ImageSelectorPane(QWidget,DataObject):
             self.model.setStringList([]);
             self.observer.unschedule_all();
 
-    def clearImageDir(self,event:FileSystemEvent|None=None):
+    def clearImageDir(self,event:Union[FileSystemEvent,None]=None):
         print("Image dir cleared on event:",event);
         self.selectImageDir(None);
 

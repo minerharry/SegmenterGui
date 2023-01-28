@@ -1294,7 +1294,7 @@ class ImageSelectorPane(QWidget,DataObject):
             
         return result;
 
-    def reloadImageDir(self,event:FileSystemEvent|None=None):
+    def reloadImageDir(self,event:Union[FileSystemEvent,None]=None):
         print("Image dir reloaded");
         dire = self.imageDirChooser.dire;
         if dire and os.path.exists(dire):
@@ -1321,7 +1321,7 @@ class ImageSelectorPane(QWidget,DataObject):
             self.model.setStringList([]);
             self.observer.unschedule_all();
 
-    def clearImageDir(self,event:FileSystemEvent|None=None):
+    def clearImageDir(self,event:Union[FileSystemEvent,None]=None):
         print("Image dir cleared on event:",event);
         self.selectImageDir(None);
 
