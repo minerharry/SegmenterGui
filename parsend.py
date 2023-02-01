@@ -11,7 +11,7 @@ def parseND(filePath):
     args = {};
     for line in lines:
         largs = line.split(", "); #line args lol
-        if len(largs) == 0:
+        if len(largs) == 1:
             assert largs[0] == "\"EndFile\"";
             break;
         args[largs[0].replace("\"","")] = largs[1].replace("\"","");
