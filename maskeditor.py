@@ -17,7 +17,7 @@ import shutil
 import json_tricks as json
 import inspect
 import circleutil
-
+from typing import Union
 from skimage.transform import resize
 from skimage.exposure import rescale_intensity
 

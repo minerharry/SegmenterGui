@@ -17,7 +17,7 @@ import os
 import shutil
 import json
 import inspect
-
+from typing import Union
 from skimage.transform import resize
 from skimage.exposure import rescale_intensity
 
