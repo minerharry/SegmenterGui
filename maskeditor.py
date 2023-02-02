@@ -1181,9 +1181,9 @@ class MaskToolbar(QWidget,DataObject): #TODO: Fix second slider handle seeming t
             self.lay.addWidget(self.maskCheck,0,2,-1,1,Qt.AlignmentFlag.AlignCenter);
         self.lay.addWidget(self.iButtons,0,3,1,2,Qt.AlignmentFlag.AlignBottom);
         self.lay.addWidget(self.zButtons,1,3,-1,1,Qt.AlignmentFlag.AlignTop);
-        self.lay.addWidget(revertWidget,1,4,-1,1,Qt.AlignmentFlag.AlignTop);
+        self.lay.addWidget(revertWidget,1,5,-1,1,Qt.AlignmentFlag.AlignTop);
         self.lay.addWidget(zoomWidget,0,5,1,1,Qt.AlignmentFlag.AlignBottom);
-        self.lay.addWidget(adjustWidget,1,5,-1,1,Qt.AlignmentFlag.AlignTop);
+        self.lay.addWidget(adjustWidget,1,4,-1,1,Qt.AlignmentFlag.AlignTop);
 
         self.drawButtons.setContentsMargins(self.gridbutton_margins)
         zoomWidget.layout().setContentsMargins(self.gridbutton_margins)
