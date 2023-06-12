@@ -781,6 +781,7 @@ class MaskContainer(QWidget,DataObject):
             errored = True;
             self.error.emit("No existing mask found; creating a blank one",20000,'mask');
             bmap = QBitmap(self.image.pixmap().size());
+            print(self.image.pixmap().size(),bmap.size())
             bmap.fill(Defaults.bmapBG);
             if (Defaults.allowMaskCreation):
                 mask = os.path.splitext(os.path.basename(image))[0]+Defaults.defaultMaskFormat;
@@ -806,6 +807,9 @@ class MaskContainer(QWidget,DataObject):
         self.imageDataRead.emit(self.imData);
         if rintensity:
             self.imRange = (max(np.min(self.imData),0),np.max(self.imData));
+            if self.imRange[0] == self.imRange[1]:
+                self.error.emit("Image has only one value, setting to black",3000,"image");
+                self.imRange = (self.imRange[0],self.imRange[0]+1)
             print("image ranged:",self.imRange);
             self.imageRanged.emit(*self.imRange);
         return self.rescaleAndPixmapData(external=False);
@@ -1366,7 +1370,7 @@ class ZoomButtons(QWidget,DataObject):
         self.lay = QHBoxLayout();
         self.lay.addWidget(self.zInButton);
         self.lay.addWidget(self.zOutButton);
-        #self.lay.addWidget(self.zoomDisplay);
+        # self.lay.addWidget(self.zoomDisplay);
         self.setLayout(self.lay);
 
     def handleClick(self,direction):
@@ -1581,7 +1585,7 @@ class ImageSelectorPane(QWidget,DataObject):
         return result;
 
     def reloadImageDir(self,event:Union[FileSystemEvent,None]=None):
-        print("Image dir reloaded");
+        print("Image dir reloaded on event:",event);
         dire = self.imageDirChooser.dire;
         if dire and os.path.exists(dire):
             filtered = list(filter(lambda x: x.lower().endswith(tuple(Defaults.supportedImageExts)),os.listdir(dire)));
@@ -1597,12 +1601,13 @@ class ImageSelectorPane(QWidget,DataObject):
                 return;
             else:
                 print(filtered,self.model.stringList());
-            
+            print("gh0");            
             last_image = self.list.currentIndex().data();
             self.model.setStringList(filtered);
-
+            print("gh1");            
             index = filtered.index(last_image) if last_image in filtered else 0;
             self.list.setCurrentIndex(self.model.index(index));
+            print("gh2");            
         else:
             self.model.setStringList([]);
             self.observer.unschedule_all();
@@ -2381,6 +2386,10 @@ class QMainSegmentWindow(QMainWindow,DataObject):
         self.shortcutsAction = QAction("Keyboard Shortcuts");
         self.exportAction = QAction("Export Masks");
         self.sessSaveAction = QAction("Save Session");
+        self.zoomInAction = QAction("Zoom In")
+        self.zoomOutAction = QAction("Zoom Out")
+        self.histogramAction = QAction("Adjust Brightness/Contrast")
+        
         self.my_actions = [self.prevAction,
             self.nextAction,
             self.increaseAction,
@@ -2393,16 +2402,22 @@ class QMainSegmentWindow(QMainWindow,DataObject):
             self.aboutAction,
             self.shortcutsAction,
             self.exportAction,
-            self.sessSaveAction];
+            self.sessSaveAction,
+            self.zoomInAction,
+            self.zoomOutAction,
+            self.histogramAction];
         
-        self.prevAction.setShortcut(QKeySequence("left"));
-        self.nextAction.setShortcut(QKeySequence("right"));
+        self.prevAction.setShortcut(QKeySequence.StandardKey.MoveToPreviousChar); #left
+        self.nextAction.setShortcut(QKeySequence.StandardKey.MoveToNextChar); #right
         self.increaseAction.setShortcut(QKeySequence("up"));
         self.decreaseAction.setShortcut(QKeySequence("down"));
         self.undoAction.setShortcut(QKeySequence.StandardKey.Undo);
         self.redoAction.setShortcut(QKeySequence.StandardKey.Redo);
         self.sessSaveAction.setShortcut(QKeySequence.StandardKey.Save);
         self.exportAction.setShortcut(QKeySequence("Ctrl+E"));
+        self.histogramAction.setShortcut(QKeySequence("Ctrl+Shift+c"));
+        self.zoomInAction.setShortcuts([QKeySequence.StandardKey.ZoomIn,QKeySequence("Ctrl+=")])
+        self.zoomOutAction.setShortcut(QKeySequence.StandardKey.ZoomOut)
 
         self.prevAction.triggered.connect(lambda: self.segmenter.data.selector.incrementImage(-1));
         self.nextAction.triggered.connect(lambda: self.segmenter.data.selector.incrementImage(1));
@@ -2417,14 +2432,19 @@ class QMainSegmentWindow(QMainWindow,DataObject):
         self.aboutAction.triggered.connect(self.about);
         self.shortcutsAction.triggered.connect(self.shortcuts);
         self.sessSaveAction.triggered.connect(self.segmenter.sessionManager.saveData);
+        self.histogramAction.triggered.connect(self.segmenter.editor.toolbar.adjustDialog.exec);
+        self.zoomInAction.triggered.connect(lambda: self.segmenter.editor.toolbar.zButtons.handleClick(1));
+        self.zoomOutAction.triggered.connect(lambda: self.segmenter.editor.toolbar.zButtons.handleClick(-1));
 
         menubar = self.menuBar();
         fileMenu = menubar.addMenu("&File");
         editMenu = menubar.addMenu("&Edit");
+        viewMenu = menubar.addMenu("&View");
         helpMenu = menubar.addMenu("&Help");
 
         fileMenu.addActions([self.imageDirAction,self.maskDirAction,self.exportAction,self.sessSaveAction,self.exitAction]);
         editMenu.addActions([self.nextAction,self.prevAction,self.increaseAction,self.decreaseAction,self.undoAction,self.redoAction]);
+        viewMenu.addActions([self.zoomInAction,self.zoomOutAction,self.histogramAction])
         helpMenu.addActions([self.aboutAction,self.shortcutsAction]);
 
     def about(self):
@@ -2437,7 +2457,7 @@ class QMainSegmentWindow(QMainWindow,DataObject):
 
     def shortcuts(self):
         shortcutList = [(action.text(),action.shortcut().toString()) for action in self.my_actions if action.shortcut()]
-        shortcutList += [("Toggle Draw Mode","Hold Ctrl/Shift"),("Hide Mask","Hold Space")] + ([("Enable Exact Cursor","Hold Tab")] if Defaults.penPreview else []) + [("Zoom In/Out","Ctrl+Scroll Up/Scroll Down"),("Scroll Left/Right", "Alt+Scroll Up/ Scroll Down")];
+        shortcutList += [("Toggle Draw Mode","Hold Ctrl/Shift"),("Hide Mask","Hold Space")] + ([("Enable Exact Cursor","Hold Tab")] if Defaults.penPreview else []) + [("Zoom In/Out (Mouse in Canvas)","Ctrl+Scroll Up/Scroll Down"),("Scroll Left/Right", "Alt+Scroll Up/ Scroll Down")];
         QMessageBox.information(self,"Keyboard Shortcuts","\n".join(["{0}: {1}".format(name,key) for (name,key) in shortcutList]),QMessageBox.StandardButton.Ok,defaultButton=QMessageBox.StandardButton.Ok);
             
     def closeEvent(self, a0: QCloseEvent) -> None:
