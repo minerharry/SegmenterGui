@@ -6,7 +6,7 @@ convenient keyboard shortcuts
 -space to show/hide mask
 
 buttons and widgets:
--fg/bg toggle, updates when shortcut is pressed
+-fg/bg brush toggle, updates when shortcut is pressed
 -brush size slider & number input, updates when shortcut is pressed
 -some sort of image browser, updates w/ shortcut
 -zoom in/out buttons
@@ -26,7 +26,6 @@ cache/save-some, save-all
 --thought: have the images in batches of n (5-10); alway have loaded the current, next, and previous batch
 --probably not needed; keep idea around in case image loading becomes a significant time sink
 
-=
 
 Datapane Requirements:
 -select input image directory
@@ -50,9 +49,6 @@ Datapane Requirements:
 --brightness adjust - show user a histogram to allow for informed clamping
 --export- change file format
 --creation of new masks; allow for original-less mask saving
-
-----comparison of some existing segmenters
-----quantification of segmenter accuracy 
 
 
 more difficult/advanced features:

@@ -1,9 +1,7 @@
-pyqt6==6.3.1
-pyqt6-Charts==6.2.0
-pyqt6-charts-qt6==6.2.2
-pyqt6-sip==13.4.0
+pyqt6
 numpy
-matplotlib
-scikit-image
+pyqt6-charts
 watchdog
 json-tricks
+pyqt6-charts-qt6
+scikit-image
