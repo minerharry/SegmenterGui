@@ -23,13 +23,9 @@ def sorted_dir(paths:List[str]):
         series = re.findall(series_regex,s);
         if series: 
             out.append(int(series[0]));
-        else:
-            print(s);
         time = re.findall(time_regex,s);
         if time:
             out.append(int(time[0]));
-        else:
-            print(s);
         return out;
     try:
         paths.sort(key=get_key);

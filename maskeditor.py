@@ -17,9 +17,10 @@ import shutil
 import json_tricks as json
 import inspect
 import circleutil
-from typing import Union
+from typing import Union,List,Tuple
 from skimage.transform import resize
 from skimage.exposure import rescale_intensity
+from pathlib import Path
 
 class LoadMode:
     biof = 0;
@@ -784,7 +785,7 @@ class MaskContainer(QWidget,DataObject):
             print(self.image.pixmap().size(),bmap.size())
             bmap.fill(Defaults.bmapBG);
             if (Defaults.allowMaskCreation):
-                mask = os.path.splitext(os.path.basename(image))[0]+Defaults.defaultMaskFormat;
+                mask = image;
         if bmap.size() != self.image.pixmap().size(): #provided mask and image are of different sizes; create new mask
             errored = True;
             self.error.emit("Existing mask file is of a different size than corresponding image, creating a blank one; enable AttemptMaskResize to automatically resize input masks",20000,'mask') #TODO: Make this actually configurable
@@ -859,18 +860,11 @@ class MaskContainer(QWidget,DataObject):
         if Defaults.loadMode == LoadMode.biof:
             bitData = bf.load_image(map);
         elif Defaults.loadMode == LoadMode.skimage:
-            bitData = imread(map);
-            bitData = np.invert(bitData);
+            bitData = imread(map).astype("uint16");
+            bitData = rescale_intensity(bitData,'image',np.uint16);
         else:
             raise NotImplementedError(f"Load mode {Defaults.loadMode} not supported");
 
-        print(bitData);
-        print(np.max(bitData));
-        print(np.min(bitData));
-        vals,counts = np.unique(bitData, return_counts=True)
-        index = np.argmax(counts)
-        print(vals[index]);
-        print("inverted:",vals[index]==np.max(bitData));
 
         if (rsize):
             print("resizing")
@@ -878,9 +872,12 @@ class MaskContainer(QWidget,DataObject):
                 rsize = [rsize.height(),rsize.width()];
             if (bitData.shape != rsize):
                 bitData = resize(bitData,rsize,anti_aliasing=False);
-        bitData = rescale_intensity(bitData,'image',np.uint16);
+        
+        print(bitData)
         shape = bitData.shape;
-        return QBitmap(QImage(bitData.data, shape[1], shape[0], 2*shape[1], QImage.Format.Format_Grayscale16));
+        result = QBitmap(QImage(bitData.data, shape[1], shape[0], 2*shape[1], QImage.Format.Format_Grayscale16));
+        print(result)
+        return result
 
     def resizeEvent(self, ev):
         self.sizeChanged.emit(self.size());
@@ -1064,14 +1061,14 @@ class ImageMask(ImageDisplayer,DataObject):
         return [self.fgColor,self.bgColor][::-1 if invert else 1];
 
     def getBitColors(self,invert=False):
-        return [Defaults.bmapBG,Defaults.bmapFG][::-1 if invert else 1];
+        return [Defaults.bmapFG,Defaults.bmapBG][::-1 if invert else 1];
 
     def reloadPixLayer(self): 
         print("pix layer reloaded");
         self.pixlayer = QPixmap(self.bitlayer.size());
         self.blankLayer = QPixmap(self.pixlayer.size());
         self.blankLayer.fill(Defaults.blankColor);
-        bg,fg = self.getPixColors();
+        fg,bg = self.getPixColors();
         self.pixlayer.fill(fg)
         pixptr = QPainter(self.pixlayer);
         pixptr.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source);
@@ -1085,6 +1082,10 @@ class ImageMask(ImageDisplayer,DataObject):
     #specifically loads a bitmap from memory and processes an image change, very different from setBitmap()
     def loadBitmap(self,bmap,fName):
         self.fileName = os.path.basename(fName) if fName else None;
+        # print(Path(fName).parents)
+        if Path(Defaults.workingDirectory) in Path(fName).parents:
+            print(f"selected mask {fName} in working directory, splitting")
+            self.fileName = os.path.splitext(self.fileName)[0] #working directory files have extra extension, ignore for saving purposes
         print("Loading mask with filename: " + str(self.fileName));
         self.setBitmap(bmap,update=False);
         self.resetUndoStack();
@@ -1114,12 +1115,16 @@ class ImageMask(ImageDisplayer,DataObject):
     @pyqtSlot()
     def save(self):
         if (self.fileName is not None):
-            print(f"attempting save mask contents to {self.fileName}");
-            saveName = self.fileName;
-            names = os.path.splitext(self.fileName);
-            if (names[1][1:].lower() not in QImageWriter.supportedImageFormats()):
-                saveName = names[0] + Defaults.defaultMaskFormat;
-            self.bitlayer.save(Defaults.workingDirectory+saveName); #NOTE: SAVES "inverted" according to windows preview - don't let it confuse you!
+            
+            savename = Defaults.workingDirectory+self.fileName+Defaults.defaultMaskFormat
+            print(f"attempting save mask contents to {savename}");
+
+            # saveName = self.fileName + Defaults.defaultMaskFormat;
+            # names = os.path.splitext(self.fileName);
+            # if (names[1][1:].lower() not in QImageWriter.supportedImageFormats()):
+            #     saveName = names[0] + Defaults.defaultMaskFormat;
+            self.bitlayer.save(savename); #NOTE: SAVES "inverted" according to windows preview - don't let it confuse you!
+            ##NOTE: The numerical values saved by bitlayer.save change depending on the extension. for consistency, all should be saved with the same format.
             if (os.path.exists(Defaults.exportedFlagFile)):
                 os.remove(Defaults.exportedFlagFile)
         else:
@@ -1417,7 +1422,7 @@ class ImageDirectoryWatcher(FileSystemEventHandler,QObject):
             self.directoryModified.emit(event);
 
 
-
+#TODO: disallow (or give warning) for selecting the working directory as your image directory
 class ImageSelectorPane(QWidget,DataObject):
     error = pyqtSignal(str,int,str);
     directoryChanged = pyqtSignal(str,str); #image directory, mask directory
@@ -1501,20 +1506,20 @@ class ImageSelectorPane(QWidget,DataObject):
             exportDir = self.exportDialog.selectedFiles()[0];
             print(f"window accepted, exporting to: {exportDir}");
             for path in filesToExport:
-                if isinstance(path,tuple):
-                    dest = path[1];
-                    source = path[0];
-                    dest = exportDir+"/"+dest;
+                dest = path[1];
+                source = path[0];
+                dest = exportDir+"/"+dest;
+                if os.path.splitext(dest)[1] == os.path.splitext(source)[1]:
+                    shutil.copy(source,dest);
+                else:
                     if source:
                         if Defaults.loadMode == LoadMode.skimage:
-                            imsave(dest,imread(source));
+                            imsave(dest,imread(source),check_contrast=False);
                         elif Defaults.loadMode == LoadMode.biof: #TODO: TEST BF WITH COMPATIBLE COMPUTER
                             data = bf.load_image(source);
                             bf.write_image(dest,data,data.dtype);
                     else:
                         self.error.emit("NOT IMPLEMENTED - cannot create blank masks during export. Please turn off \'createEmptyMasksForExport\' in settings.",2000,"export")
-                elif (exportDir != os.path.dirname(path)): 
-                    shutil.copy(path,exportDir);
             print("Export successful");
             with open(Defaults.exportedFlagFile,'w') as f:
                 pass;
@@ -1549,7 +1554,7 @@ class ImageSelectorPane(QWidget,DataObject):
 
 
 
-    def getAllMaskFilePaths(self,includeModify=False): #should only be called if both mask and image directory selected
+    def getAllMaskFilePaths(self,includeModify=False)->List[Tuple[str,str]]: #should only be called if both mask and image directory selected
         if not(self.imageDirChooser.dire and (self.maskDirChooser.dire or Defaults.allowMaskCreation)):
             print("Warning: attempting to get file paths without without proper directories");
             return [];
@@ -1566,21 +1571,19 @@ class ImageSelectorPane(QWidget,DataObject):
             working = list(filter(lambda x: x.startswith(base+"."),workingMasks));
             original = list(filter(lambda x:x.startswith(base+"."),originalMasks));
             if len(working) > 0 and len(original) > 0:
-                maskExt = os.path.splitext(working[0])[1]; imageext = os.path.splitext(original[0])[1];
-                if maskExt == imageext or not includeModify:
-                    result.append(Defaults.workingDirectory + working[0]);
-                else:
-                    result.append((Defaults.workingDirectory + working[0],original[0]));
+                ##export from working directory
+                result.append((Defaults.workingDirectory + working[0],original[0]));
             elif len(working) > 0:
+                #no originals, but working directory, so mask creation
                 if Defaults.convertUnassignedMasks and self.exportPane is not None and includeModify:
-                    result.append((Defaults.workingDirectory + working[0],os.path.splitext(working[0])[0]+self.exportPane.maskExt()));
+                    result.append((Defaults.workingDirectory + working[0],os.path.splitext(os.path.splitext(working[0])[0])[0]+self.exportPane.maskExt()));
                 else:
-                    result.append(Defaults.workingDirectory + working[0]);
+                    result.append((Defaults.workingDirectory + working[0],os.path.splitext(working[0])[0]));
             elif len(original) > 0:
-                result.append(self.maskDirChooser.dire + "\\" + original[0]);
+                result.append((self.maskDirChooser.dire + "\\" + original[0],original[0]));
             elif Defaults.createEmptyMasksForExport and includeModify:
                 ext = self.exportPane.maskExt() if self.exportPane else Defaults.defaultMaskFormat;
-                result.append(None,base+ext);
+                result.append((None,base+ext));
             
         return result;
 
@@ -1599,8 +1602,8 @@ class ImageSelectorPane(QWidget,DataObject):
                 #no change
                 print("directory modified, no effect");
                 return;
-            else:
-                print(filtered,self.model.stringList());
+            # else:
+                # print(filtered,self.model.stringList());
             print("gh0");            
             last_image = self.list.currentIndex().data();
             self.model.setStringList(filtered);
@@ -1688,7 +1691,7 @@ class ImageSelectorPane(QWidget,DataObject):
                 print(f"looking for mask with basename: {baseName}");
                 workingFiles = os.listdir(Defaults.workingDirectory);
                 #print(f"Working files: {workingFiles}");
-                workingMasks = list(filter(lambda x: x.startswith(baseName+".") and x.lower().endswith(tuple(Defaults.supportedMaskExts)),workingFiles));
+                workingMasks = list(filter(lambda x: x.startswith(imName) and x.lower().endswith(tuple(Defaults.supportedMaskExts)),workingFiles));
                 #print(f"Working Masks: {workingMasks}")
                 maskName = workingMasks[0] if len(workingMasks) > 0 else None;
                 if maskName:
