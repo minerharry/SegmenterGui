@@ -21,6 +21,7 @@ from typing import Union,List,Tuple
 from skimage.transform import resize
 from skimage.exposure import rescale_intensity
 from pathlib import Path
+from tqdm import tqdm
 
 class LoadMode:
     biof = 0;
@@ -875,6 +876,12 @@ class MaskContainer(QWidget,DataObject):
         
         print(bitData)
         shape = bitData.shape;
+        if len(bitData.shape) > 2:
+            if len(bitData.shape) == 3:
+                bitData = bitData[:,:,0]
+            else:
+                raise Exception()
+
         result = QBitmap(QImage(bitData.data, shape[1], shape[0], 2*shape[1], QImage.Format.Format_Grayscale16));
         print(result)
         return result
@@ -1503,12 +1510,12 @@ class ImageSelectorPane(QWidget,DataObject):
 
         if (output != 0):
             self.exportStart.emit();
-            exportDir = self.exportDialog.selectedFiles()[0];
+            exportDir = Path(self.exportDialog.selectedFiles()[0]);
             print(f"window accepted, exporting to: {exportDir}");
-            for path in filesToExport:
+            for path in tqdm(filesToExport,desc="exporting"):
                 dest = path[1];
                 source = path[0];
-                dest = exportDir+"/"+dest;
+                dest = exportDir/dest;
                 if os.path.splitext(dest)[1] == os.path.splitext(source)[1]:
                     shutil.copy(source,dest);
                 else:
@@ -1580,7 +1587,7 @@ class ImageSelectorPane(QWidget,DataObject):
                 else:
                     result.append((Defaults.workingDirectory + working[0],os.path.splitext(working[0])[0]));
             elif len(original) > 0:
-                result.append((self.maskDirChooser.dire + "\\" + original[0],original[0]));
+                result.append((Path(self.maskDirChooser.dire)/original[0],original[0]));
             elif Defaults.createEmptyMasksForExport and includeModify:
                 ext = self.exportPane.maskExt() if self.exportPane else Defaults.defaultMaskFormat;
                 result.append((None,base+ext));
@@ -1684,7 +1691,7 @@ class ImageSelectorPane(QWidget,DataObject):
                 self.imageChanged.emit(None,None);
                 return;
             imName = self.getSelectedImageName(row)
-            imagePath = self.imageDirChooser.dire+"/"+imName;
+            imagePath = Path(self.imageDirChooser.dire)/imName;
             maskPath = None;
             if self.maskDirChooser.dire or Defaults.allowMaskCreation:
                 baseName = os.path.splitext(imName)[0];
@@ -1703,7 +1710,7 @@ class ImageSelectorPane(QWidget,DataObject):
                         maskName = goodMasks[0]
                         if (len(goodMasks) > 1):
                             print(f"warning: more than one mask file with the same name, unsupported behavior. Using {maskName}");
-                        maskPath = (self.maskDirChooser.dire+"/"+maskName);
+                        maskPath = (Path(self.maskDirChooser.dire)/maskName);
             self.imLoadStart.emit()
             self.repaint();
             self.prepImageChange.emit();    
