@@ -1659,7 +1659,7 @@ class ImageSelectorPane(QWidget,DataObject):
         else:
             self.observer.unschedule_all();
 
-        if emit: self.directoryChanged.emit(dire,None);
+        if emit: self.directoryChanged.emit(str(dire),None);
         return index;
 
     def selectMaskDir(self,dire,clear=True,emit=True,change=True): 
@@ -1669,7 +1669,7 @@ class ImageSelectorPane(QWidget,DataObject):
         print(f"mask dir selected: {dire}")
         if clear: self.clearWorkingDir();
         if change: self.changeImage();
-        if emit: self.directoryChanged.emit(self.imageDirChooser.dire,dire);
+        if emit: self.directoryChanged.emit(str(self.imageDirChooser.dire),str(dire));
 
     def clearWorkingDir(self): #TODO: Make separate object for working dir management, make this a signal instead
         print("Beep boop clearing working directory");
@@ -1714,7 +1714,7 @@ class ImageSelectorPane(QWidget,DataObject):
             self.imLoadStart.emit()
             self.repaint();
             self.prepImageChange.emit();    
-            self.imageChanged.emit(imagePath,maskPath);
+            self.imageChanged.emit(str(imagePath),str(maskPath));
             self.imLoadEnd.emit()
 
     def getSelectedImageName(self,row=None):
@@ -1816,7 +1816,7 @@ class DirectorySelector(QWidget):
         self.fileDialog.setDirectory(self.dire if self.dire else "");
         if emit:
             print("Directory Change Signal Emitted")
-            self.directoryChanged.emit(self.dire);
+            self.directoryChanged.emit(str(self.dire));
         else:
             self.pathLabel.setText(self.dire);
             self.pathLabel.setToolTip(self.dire);
