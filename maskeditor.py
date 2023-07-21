@@ -878,7 +878,7 @@ class MaskContainer(QWidget,DataObject):
         shape = bitData.shape;
         if len(bitData.shape) > 2:
             if len(bitData.shape) == 3:
-                bitData = bitData[:,:,0]
+                bitData = bitData[:,:,0].copy()
             else:
                 raise Exception()
 
