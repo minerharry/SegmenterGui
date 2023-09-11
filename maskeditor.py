@@ -1420,8 +1420,8 @@ class ImageDirectoryWatcher(FileSystemEventHandler,QObject):
     directoryRemoved = pyqtSignal();
 
     def on_any_event(self,event):
-        print("event happened:",event);
-        print("event type:",event.event_type);
+        # print("event happened:",event);
+        # print("event type:",event.event_type);
         # print("event properties:",{at:getattr(event,at) for at in dir(event)});
         if (event.is_directory):
             self.directoryRemoved.emit(event);
