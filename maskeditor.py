@@ -1,3 +1,4 @@
+from ColorButton import ColorButton
 import parsend
 from to_precision import std_notation
 from rangesliderside import RangeSlider
@@ -5,7 +6,7 @@ from PyQt6 import QtGui
 from PyQt6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 from PyQt6.QtWidgets import QAbstractItemView, QAbstractSlider, QApplication, QCheckBox, QComboBox, QCompleter, QDialog, QFileDialog, QGraphicsPathItem, QGraphicsScene, QGraphicsView, QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit, QListView, QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QSlider, QSplitter, QStatusBar, QStyle, QStyleOptionFrame, QToolButton, QVBoxLayout, QWidget, QWhatsThis
 from PyQt6 import QtCore
-from PyQt6.QtCore import QFile, QLineF, QMargins, QMarginsF, QPoint, QPointF, QRect, QRectF, QSignalMapper, QSize, QStringListModel, QTimer, Qt, pyqtSignal, pyqtSlot, QObject, QEvent, QUrl
+from PyQt6.QtCore import QFile, QLineF, QMargins, QMarginsF, QPoint, QPointF, QRect, QRectF, QSignalMapper, QSize, QStringListModel, QTimer, Qt, pyqtSignal, pyqtSlot, QObject, QEvent, QUrl, QCoreApplication
 from PyQt6.QtGui import QAction, QBitmap, QBrush, QCloseEvent, QColor, QCursor, QDoubleValidator, QFontMetrics, QGuiApplication, QIcon, QImage, QImageWriter, QIntValidator, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QPolygon, QPolygonF, QShortcut, QKeySequence, QTextDocument, QTransform, QUndoCommand, QUndoStack, QValidator
 import numpy as np
 import math
@@ -22,6 +23,8 @@ from skimage.transform import resize
 from skimage.exposure import rescale_intensity
 from pathlib import Path
 from tqdm import tqdm
+import webbrowser
+from natsort import natsorted, ns
 
 class LoadMode:
     biof = 0;
@@ -32,9 +35,8 @@ class Defaults:
     loadMode = LoadMode.skimage; #TODO: image load error when switching between formats on first load, not reproducible
     blankSize = QSize(300,300);
     blankColor = QColor(0,0,0,0);
-    opacity = 0.5;
-    defaultFG = QColor(0,0,0,0);
-    defaultBG = QColor(70,0,0,60);
+    defaultFG = QColor(255,255,255,10)#QColor(255,0,255,50)
+    defaultBG = QColor(70,0,0,60)#QColor(0,255,255,50)
     bmapFG = Qt.GlobalColor.color0
     bmapBG = Qt.GlobalColor.color1;
     defaultBrushSize = 10;
@@ -86,7 +88,8 @@ else:
 
 class DataObject: #basic implementation of object data loading/saving
 
-    def loadState(self,data,stack="root",**kwargs):
+    #loadstate is mostly internal, but can be overriden if need be
+    def _loadState(self,data,stack="root",**kwargs):
         print("loading state for object",stack);
         errors = [];
         if data == {}:
@@ -97,7 +100,7 @@ class DataObject: #basic implementation of object data loading/saving
                     # print("loading child state:",name);
                     child = getattr(self,name)
                     if isinstance(child,DataObject):
-                        errors.extend(child.loadState(datum,stack = stack+"."+name));
+                        errors.extend(child._loadState(datum,stack = stack+"."+name));
                     else:
                         print(f"Data state load error: named child {name} not an instance of DataObject");
                 else:
@@ -115,11 +118,12 @@ class DataObject: #basic implementation of object data loading/saving
     def loadData(self,data): #loads data for self; can be left blank if no data for that class
         pass;
 
-    def getStateData(self,stack="root"): #error format: list of [obj_stack,type,error] errors;
+    #getstatedata is mostly internal, but can be overriden if need be
+    def _getStateData(self,stack="root"): #error format: list of [obj_stack,type,error] errors;
         children = {};
         errors = [];
         for child,chObj in inspect.getmembers(self,lambda x: isinstance(x,DataObject)):
-            children[child],ch_errors = DataObject.getStateData(chObj,stack=stack+"."+child);
+            children[child],ch_errors = DataObject._getStateData(chObj,stack=stack+"."+child);
             errors.extend(ch_errors);
         selfdata = None;
         error = None;
@@ -220,6 +224,8 @@ class MaskSegmenter(QSplitter,DataObject):
         self.data.selector.imageDirChooser.browseButton.installEventFilter(self);
         self.data.exportPane.exportButton.installEventFilter(self);
         self.data.exportPane.clearButton.installEventFilter(self);
+        self.editor.toolbar.colorbuttons.installEventFilter(self)
+        QCoreApplication.instance().installEventFilter(self);
 
         ### SESSION SAVING STUFF
         self.autosaveTimer = QTimer(self);
@@ -286,7 +292,19 @@ class MaskSegmenter(QSplitter,DataObject):
         return super().event(ev);
         
 
-    def eventFilter(self,obj,ev):
+    def eventFilter(self,obj:QObject,ev):
+        if not isinstance(ev,QtGui.QInputEvent): return False
+        tobj = obj
+        while ( tobj is not  None ):
+            if( tobj == self ):
+                break;
+            try:
+                tobj = tobj.parent()
+            except:
+                from IPython import embed; embed()
+        if tobj is None:
+            return False
+
         out = False;
         if ev.type() in [QEvent.Type.KeyPress,QEvent.Type.ShortcutOverride]:
             # print("key event - filter");
@@ -407,7 +425,7 @@ class SessionManager(QObject):
             self.data = {};
 
     def loadData(self):
-        errors = self.dataSource.loadState(self.data);
+        errors = self.dataSource._loadState(self.data);
         if errors:
             for error in errors:
                 print(f"Error in loading data to {error[0]}: {error[3]}");
@@ -415,7 +433,7 @@ class SessionManager(QObject):
     def saveData(self):
         self.saved.emit();
         print('saving...');
-        self.data,errors = self.dataSource.getStateData();
+        self.data,errors = self.dataSource._getStateData();
         if errors:
             error_msg = ""
             if len(errors) == 1:
@@ -475,6 +493,8 @@ class EditorPane(QWidget,DataObject):
             self.toolbar.exactCheck.toggled.connect(self.maskView.setExactCursorMode);
         self.maskView.maskContainer.imageRanged.connect(self.toolbar.adjustDialog.setPixelRange);
         self.maskView.maskContainer.imageDataRead.connect(self.toolbar.adjustDialog.loadImageData);
+        self.toolbar.colorbuttons.fgColorChanged.connect(self.maskView.maskContainer.mask.setFGColor)
+        self.toolbar.colorbuttons.bgColorChanged.connect(self.maskView.maskContainer.mask.setBGColor)
 
 class MaskedImageView(QGraphicsView,DataObject):
     wheel_factor = 0.1;
@@ -751,14 +771,14 @@ class MaskContainer(QWidget,DataObject):
     #switches to a specific image, and loads mask if provided
     #both image and mask are filenames
     @pyqtSlot(str,str)
-    def switchImage(self,image=None,mask=None):
-        print(f"switching image, extant mask: {mask}")
+    def switchImage(self,image=None,maskName=None):
+        print(f"switching image, extant mask: {maskName}")
         errored = False;
         if image == "":
             image = None;
-        if mask == "":
-            mask = None;
-        print(f"switching image to Image: {image} and Mask: {mask}")
+        if maskName == "":
+            maskName = None;
+        print(f"switching image to Image: {image} and Mask: {maskName}")
         if image == self.imName:
             print("image already loaded, reusing image data");
         else:
@@ -776,8 +796,8 @@ class MaskContainer(QWidget,DataObject):
         # print("label pmap size:",self.image.pixmap().size())
         # print(self.image.geometry())
         # print(self.image.size());
-        if mask and os.path.exists(mask):
-            bmap = self.readBitmap(mask,rsize=(self.image.size() if Defaults.attemptMaskResize else None));
+        if maskName and os.path.exists(maskName):
+            bmap = self.readBitmap(maskName,rsize=(self.image.size() if Defaults.attemptMaskResize else None));
             print("creating mask from file")
         else:
             errored = True;
@@ -786,14 +806,14 @@ class MaskContainer(QWidget,DataObject):
             print(self.image.pixmap().size(),bmap.size())
             bmap.fill(Defaults.bmapBG);
             if (Defaults.allowMaskCreation):
-                mask = image;
+                maskName = image;
         if bmap.size() != self.image.pixmap().size(): #provided mask and image are of different sizes; create new mask
             errored = True;
             self.error.emit("Existing mask file is of a different size than corresponding image, creating a blank one; enable AttemptMaskResize to automatically resize input masks",20000,'mask') #TODO: Make this actually configurable
             bmap = QBitmap(self.image.pixmap().size());
             bmap.fill(Defaults.bmapBG);
         print("Bitmap created, loading...")
-        self.mask.loadBitmap(bmap,mask);
+        self.mask.loadBitmap(bmap,maskName);
         print("Bitmap loaded")
         self.sizeChanged.emit(self.size());
         if not errored:
@@ -931,8 +951,8 @@ class ImageMask(ImageDisplayer,DataObject):
         self.fileName = None;
         self.fgColor = Defaults.defaultFG;
         self.bgColor = Defaults.defaultBG;
-        self.pen = QPen(Defaults.defaultFG,Defaults.defaultBrushSize,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap,Qt.PenJoinStyle.RoundJoin);
-        self.brush = QBrush(Defaults.defaultFG);
+        self.pen = QPen(self.fgColor,Defaults.defaultBrushSize,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap,Qt.PenJoinStyle.RoundJoin);
+        self.brush = QBrush(self.fgColor);
         self.drawMode = DrawMode.INCLUDE;
         self.bitlayer = QBitmap(initSize);
         self.bitlayer.clear();
@@ -946,7 +966,7 @@ class ImageMask(ImageDisplayer,DataObject):
         self.tabletErasing = False;
 
         self.resetUndoStack();#new states added to the end; lower number is more recent
-        
+
     def setPixlayerVisibility(self,visible):
         self.pixVisible = visible;
         if visible:
@@ -1107,9 +1127,13 @@ class ImageMask(ImageDisplayer,DataObject):
 
     def setFGColor(self,colour):
         self.fgColor = colour;
+        print(f"Fg color set: {colour.name(QColor.NameFormat.HexArgb)}")
+        self.reloadPixLayer()
     
     def setBGColor(self,colour):
         self.bgColor = colour;
+        print(f"Bg color set: {colour.name(QColor.NameFormat.HexArgb)}")
+        self.reloadPixLayer()
 
     @pyqtSlot(int)
     def setDrawMode(self,mode):
@@ -1182,9 +1206,10 @@ class MaskToolbar(QWidget,DataObject): #TODO: Fix second slider handle seeming t
         revertWidget.setLayout(QHBoxLayout());
         self.revertButton = QPushButton("Revert to Original")
         revertWidget.layout().addWidget(self.revertButton);
-        
         self.revertButton.clicked.connect(self.revert);
         self.maskRevert.connect(self.adjustDialog.reset);
+
+        self.colorbuttons = ColorButtons()
         
         self.lay.addWidget(self.slider,0,0,-1,1);
         self.lay.addWidget(self.drawButtons,0,1,-1,1,Qt.AlignmentFlag.AlignCenter);
@@ -1200,12 +1225,12 @@ class MaskToolbar(QWidget,DataObject): #TODO: Fix second slider handle seeming t
         self.lay.addWidget(revertWidget,1,5,-1,1,Qt.AlignmentFlag.AlignTop);
         self.lay.addWidget(zoomWidget,0,5,1,1,Qt.AlignmentFlag.AlignBottom);
         self.lay.addWidget(adjustWidget,1,4,-1,1,Qt.AlignmentFlag.AlignTop);
+        self.lay.addWidget(self.colorbuttons,0,6,-1,1,Qt.AlignmentFlag.AlignTop)
 
         self.drawButtons.setContentsMargins(self.gridbutton_margins)
         zoomWidget.layout().setContentsMargins(self.gridbutton_margins)
         adjustWidget.layout().setContentsMargins(self.gridbutton_margins)
         revertWidget.layout().setContentsMargins(self.gridbutton_margins)
-        # self.lay.a
 
         self.lay.addWidget(None,0,7);
         self.lay.addWidget(None,2,1,-1,1); #below all widgets but the slider
@@ -1360,6 +1385,54 @@ class NextPrevButtons(QWidget,DataObject):
     def handleNButton(self):
         self.increment.emit(1);
 
+class ColorButtons(QWidget,DataObject):
+    resetIconPath = "./reset.png"
+    fgColorChanged = pyqtSignal(QColor)
+    bgColorChanged = pyqtSignal(QColor)
+
+    def __init__(self,parent=None):
+        super().__init__(parent)
+        self.createObjects();
+
+    def createObjects(self):
+        self.fgColorButton = ColorButton(color=Defaults.defaultFG,allow_alpha=True)
+        self.fgColorButton.colorChanged.connect(self.fgColorChanged.emit)
+
+        self.bgColorButton = ColorButton(color=Defaults.defaultBG,allow_alpha=True)
+        self.bgColorButton.colorChanged.connect(self.bgColorChanged.emit)
+        
+        self.resetButton = QToolButton()
+        self.resetButton.setIcon(QIcon(self.resetIconPath))
+        self.resetButton.clicked.connect(self.reset)
+
+
+        self.setLayout(QVBoxLayout());
+        self.layout().addWidget(self.fgColorButton,Qt.AlignmentFlag.AlignHCenter)
+        self.layout().addWidget(self.bgColorButton,Qt.AlignmentFlag.AlignHCenter)
+        self.layout().addWidget(self.resetButton,Qt.AlignmentFlag.AlignHCenter)
+
+        self.setStyleSheet("ColorButtons {border-style=solid;border-width=1px;border-color=lightgray;}")
+
+    def reset(self):
+        self.fgColorButton.setColor(Defaults.defaultFG)
+        self.bgColorButton.setColor(Defaults.defaultBG)
+
+    def loadData(self, data:tuple[Union[str,None],Union[str,None]]):
+        self.fgColorButton.setColor(QColor(data[0]))
+        self.bgColorButton.setColor(QColor(data[1]))
+
+    @property
+    def fgColor(self):
+        return self.fgColorButton.color()
+    
+    @property
+    def bgColor(self):
+        return self.bgColorButton.color()
+
+    def getSaveData(self):
+        return (self.fgColor.name(QColor.NameFormat.HexArgb),self.bgColor.name(QColor.NameFormat.HexArgb))
+
+
 class ZoomButtons(QWidget,DataObject):
     zInIconPath = "./zoom-in.png";
     zOutIconPath = "./zoom-out.png";
@@ -1420,9 +1493,6 @@ class ImageDirectoryWatcher(FileSystemEventHandler,QObject):
     directoryRemoved = pyqtSignal();
 
     def on_any_event(self,event):
-        # print("event happened:",event);
-        # print("event type:",event.event_type);
-        # print("event properties:",{at:getattr(event,at) for at in dir(event)});
         if (event.is_directory):
             self.directoryRemoved.emit(event);
         else:
@@ -1516,6 +1586,8 @@ class ImageSelectorPane(QWidget,DataObject):
                 dest = path[1];
                 source = path[0];
                 dest = exportDir/dest;
+                if source == dest: #copying original, unmodified mask into its own directory (rare)
+                    continue
                 if os.path.splitext(dest)[1] == os.path.splitext(source)[1]:
                     shutil.copy(source,dest);
                 else:
@@ -1600,11 +1672,12 @@ class ImageSelectorPane(QWidget,DataObject):
         if dire and os.path.exists(dire):
             filtered = list(filter(lambda x: x.lower().endswith(tuple(Defaults.supportedImageExts)),os.listdir(dire)));
             filtered.sort(key = lambda e: (len(e),e));
-            if any(filter(lambda x: x.lower().endswith('.nd'),os.listdir(dire))):
-                try:
-                    filtered = parsend.sorted_dir(filtered);
-                except Exception as e:
-                    print(e);
+            # if any(filter(lambda x: x.lower().endswith('.nd'),os.listdir(dire))):
+            #     try:
+            #         filtered = parsend.sorted_dir(filtered);
+            #     except Exception as e:
+            #         print(e);
+            filtered = natsorted(filtered,alg=ns.LOCALE|ns.PATH)
             if filtered == self.model.stringList():
                 #no change
                 print("directory modified, no effect");
@@ -1635,11 +1708,14 @@ class ImageSelectorPane(QWidget,DataObject):
         if dire and dire != '':
             filtered = list(filter(lambda x: x.lower().endswith(tuple(Defaults.supportedImageExts)),os.listdir(dire)));
             filtered.sort(key = lambda e: (len(e),e));
-            if any(filter(lambda x: x.lower().endswith('.nd'),os.listdir(dire))):
-                try:
-                    filtered = parsend.sorted_dir(filtered);
-                except Exception as e:
-                    print(e);
+            # if any(filter(lambda x: x.lower().endswith('.nd'),os.listdir(dire))):
+            #     try:
+            #         filtered = parsend.sorted_dir(filtered);
+            #     except Exception as e:
+            #         print(e);
+
+            ##just always sort "naturally" using natsort:
+            filtered = natsorted(filtered,alg=ns.LOCALE|ns.PATH)
             self.model.setStringList(filtered);
 
         else:
@@ -1747,11 +1823,11 @@ class ImageSelectorPane(QWidget,DataObject):
 class DirectorySelector(QWidget):
     directoryChanged = pyqtSignal(str);
     
-    def __init__(self,title="Select Directory:",startingDirectory=None,parent=None,buttonText="Browse...",dialog=None,clearBtn = ""):
+    def __init__(self,title="Select Directory:",startingDirectory=None,parent=None,buttonText="Browse",dialog=None,openBtn = "Show",clearBtn = ""):
         super().__init__(parent=parent);
-        self.createObjects(title,startingDirectory,dialog,buttonText,clearBtn);
+        self.createObjects(title,startingDirectory,dialog,buttonText,openBtn,clearBtn);
     
-    def createObjects(self,title,dire,dialog,buttonText,clearBtn):
+    def createObjects(self,title,dire,dialog,buttonText,openBtn,clearBtn):
         self.dire = dire;
         self.dialog = dialog;
         if self.dialog:
@@ -1763,11 +1839,16 @@ class DirectorySelector(QWidget):
         self.lay = QGridLayout();
         self.lay.addWidget(self.title,0,0);
         self.lay.addWidget(self.browseButton,0,1);
+        if openBtn:
+            self.openButton = QPushButton(openBtn)
+            self.openButton.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Fixed,QSizePolicy.Policy.Fixed));
+            self.openButton.clicked.connect(self.revealInExplorer)
+            self.lay.addWidget(self.openButton,0,2)
         if clearBtn:
             self.clearButton = QPushButton(clearBtn);
             self.clearButton.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Fixed,QSizePolicy.Policy.Fixed));
             self.clearButton.clicked.connect(lambda: self.checkDialog(self.clearSelection));
-            self.lay.addWidget(self.clearButton,0,2);
+            self.lay.addWidget(self.clearButton,0,3);
         self.lay.addWidget(self.pathLabel,1,0,1,-1);
 
         self.fileDialog = QFileDialog(self);
@@ -1779,6 +1860,8 @@ class DirectorySelector(QWidget):
         self.directoryChanged.connect(self.pathLabel.setToolTip);
         self.browseButton.clicked.connect(lambda: self.checkDialog(self.selectDirectory));
 
+    def revealInExplorer(self):
+        webbrowser.open(os.path.realpath(self.dire))
 
     @pyqtSlot()
     def checkDialog(self,func):
@@ -2025,12 +2108,12 @@ class AdjustmentDialog(QDialog,DataObject): #TODO: Make it clear that pixel inte
 
     def saveState(self):
         print("state saved");
-        self.tempState,errors = self.getStateData();
+        self.tempState,errors = self._getStateData();
 
     def revertState(self):
         print("state reverted");
         print(self.tempState);
-        errors = self.loadState(self.tempState,stack="temp.AdjustmentDialog",apply=self.applied);
+        errors = self._loadState(self.tempState,stack="temp.AdjustmentDialog",apply=self.applied);
         # print(errors);
 
     def persistent(self):
