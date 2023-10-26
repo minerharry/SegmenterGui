@@ -1823,7 +1823,7 @@ class ImageSelectorPane(QWidget,DataObject):
 class DirectorySelector(QWidget):
     directoryChanged = pyqtSignal(str);
     
-    def __init__(self,title="Select Directory:",startingDirectory=None,parent=None,buttonText="Browse",dialog=None,openBtn = "Show",clearBtn = ""):
+    def __init__(self,title="Select Directory:",startingDirectory=None,parent=None,buttonText="Browse",dialog=None,openBtn = "Open",clearBtn = ""):
         super().__init__(parent=parent);
         self.createObjects(title,startingDirectory,dialog,buttonText,openBtn,clearBtn);
     
