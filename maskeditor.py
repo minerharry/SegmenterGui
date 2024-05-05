@@ -406,7 +406,7 @@ class SessionManager(QObject):
     error = pyqtSignal(str,int,str);
     saved = pyqtSignal();
 
-    def __init__(self,path,dataSource:DataObject):
+    def __init__(self,path:os.PathLike,dataSource:DataObject):
         super().__init__();
         self.dataSource = dataSource;
         self.path = path;

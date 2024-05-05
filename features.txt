@@ -51,9 +51,10 @@ Datapane Requirements:
 --creation of new masks; allow for original-less mask saving
 
 
-more difficult/advanced features:
+more difficult/advanced features (TODO):
 -select specific area of image to "focus" on in terms of brightness autoscaling
 -drag to resize panes
 keyboard shortcut settings / config file
 -might not be super necessary
 fill tool - all contiguous area [of fg/bg]
+--import/export session - with options to include/exclude working masks
