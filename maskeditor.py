@@ -18,7 +18,7 @@ import shutil
 import json_tricks as json
 import inspect
 import circleutil
-from typing import Union,List,Tuple
+from typing import Any, Union,List,Tuple
 from skimage.transform import resize
 from skimage.exposure import rescale_intensity
 from pathlib import Path
@@ -292,7 +292,7 @@ class MaskSegmenter(QSplitter,DataObject):
         return super().event(ev);
         
 
-    def eventFilter(self,obj:QObject,ev):
+    def eventFilter(self,obj:QObject,ev:Union[QtGui.QInputEvent,Any]):
         if not isinstance(ev,QtGui.QInputEvent): return False
         tobj = obj
         while ( tobj is not  None ):
@@ -378,7 +378,7 @@ class SegmenterStatusBar(QStatusBar): #TODO: add additional status & error messa
         return super().showMessage(message, msecs=msecs)
 
     def showCursorPos(self,pos:QPointF):
-        if pos and not pos.isNull():
+        if bool(pos) and not pos.isNull():
             self.cursorWidget.setText(f"({std_notation(pos.x(),4)},{std_notation(pos.y(),4)})");
             if not self.currentMessage():
                 self.cursorWidget.show();
@@ -1397,13 +1397,16 @@ class ColorButtons(QWidget,DataObject):
     def createObjects(self):
         self.fgColorButton = ColorButton(color=Defaults.defaultFG,allow_alpha=True)
         self.fgColorButton.colorChanged.connect(self.fgColorChanged.emit)
+        self.fgColorButton.setToolTip("Foreground Color")
 
         self.bgColorButton = ColorButton(color=Defaults.defaultBG,allow_alpha=True)
         self.bgColorButton.colorChanged.connect(self.bgColorChanged.emit)
+        self.bgColorButton.setToolTip("Background Color")
         
         self.resetButton = QToolButton()
         self.resetButton.setIcon(QIcon(self.resetIconPath))
         self.resetButton.clicked.connect(self.reset)
+        self.resetButton.setToolTip("Reset colors to default")
 
 
         self.setLayout(QVBoxLayout());
