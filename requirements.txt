@@ -6,3 +6,4 @@ watchdog
 json-tricks
 pyqt6-charts-qt6
 scikit-image
+natsort
