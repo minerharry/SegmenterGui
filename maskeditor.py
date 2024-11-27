@@ -1,4 +1,5 @@
 from ColorButton import ColorButton
+from enum import Enum
 import parsend
 from to_precision import std_notation
 from rangesliderside import RangeSlider
@@ -6,7 +7,7 @@ from PyQt6 import QtGui
 from PyQt6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 from PyQt6.QtWidgets import QAbstractItemView, QAbstractSlider, QApplication, QCheckBox, QComboBox, QCompleter, QDialog, QFileDialog, QGraphicsPathItem, QGraphicsScene, QGraphicsView, QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit, QListView, QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QSlider, QSplitter, QStatusBar, QStyle, QStyleOptionFrame, QToolButton, QVBoxLayout, QWidget, QWhatsThis
 from PyQt6 import QtCore
-from PyQt6.QtCore import QFile, QLineF, QMargins, QMarginsF, QPoint, QPointF, QRect, QRectF, QSignalMapper, QSize, QStringListModel, QTimer, Qt, pyqtSignal, pyqtSlot, QObject, QEvent, QUrl, QCoreApplication
+from PyQt6.QtCore import QFile, QLineF, QMargins, QMarginsF, QPoint, QPointF, QRect, QRectF, QSignalMapper, QSize, QStringListModel, QTimer, Qt, pyqtSignal, pyqtSlot, QObject, QEvent, QUrl, QCoreApplication, QByteArray, QIODevice, QBuffer
 from PyQt6.QtGui import QAction, QBitmap, QBrush, QCloseEvent, QColor, QCursor, QDoubleValidator, QFontMetrics, QGuiApplication, QIcon, QImage, QImageWriter, QIntValidator, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QPolygon, QPolygonF, QShortcut, QKeySequence, QTextDocument, QTransform, QUndoCommand, QUndoStack, QValidator
 import numpy as np
 import math
@@ -29,10 +30,11 @@ from natsort import natsorted, ns
 class LoadMode:
     biof = 0;
     skimage = 1;
+    imageio = 2;
 
 class Defaults:
     bioLogging = False;
-    loadMode = LoadMode.skimage; #TODO: image load error when switching between formats on first load, not reproducible
+    loadMode = LoadMode.imageio; #TODO: image load error when switching between formats on first load, not reproducible
     blankSize = QSize(300,300);
     blankColor = QColor(0,0,0,0);
     defaultFG = QColor(255,255,255,10)#QColor(255,0,255,50)
@@ -82,8 +84,11 @@ if Defaults.loadMode == LoadMode.biof:
         def init_logger(self):
             pass
         bf.init_logger = init_logger
-else:
+elif Defaults.loadMode == LoadMode.skimage:
+    raise DeprecationWarning("skimage imread/imsave is deprecated! Please use imageio.")
     from skimage.io import imread,imsave
+else:
+    from imageio import imread,imsave
 
 
 class DataObject: #basic implementation of object data loading/saving
@@ -823,7 +828,7 @@ class MaskContainer(QWidget,DataObject):
         self.imData = None;
         if Defaults.loadMode == LoadMode.biof:
             self.imData = bf.load_image(image);
-        elif Defaults.loadMode == LoadMode.skimage:
+        elif Defaults.loadMode in (LoadMode.skimage,LoadMode.imageio):
             self.imData = imread(image);
         self.imData = rescale_intensity(self.imData,in_range='dtype',out_range=(0.0,1.0));
         self.imageDataRead.emit(self.imData);
@@ -880,7 +885,7 @@ class MaskContainer(QWidget,DataObject):
     def readBitmap(self,map,rsize=None):
         if Defaults.loadMode == LoadMode.biof:
             bitData = bf.load_image(map);
-        elif Defaults.loadMode == LoadMode.skimage:
+        elif Defaults.loadMode in (LoadMode.skimage,LoadMode.imageio):
             bitData = imread(map).astype("uint16");
             bitData = rescale_intensity(bitData,'image',np.uint16);
         else:
@@ -956,12 +961,12 @@ class ImageMask(ImageDisplayer,DataObject):
         self.drawMode = DrawMode.INCLUDE;
         self.bitlayer = QBitmap(initSize);
         self.bitlayer.clear();
-        self.pixlayer = QPixmap(initSize);
+        self.pixlayer:QPixmap = QPixmap(initSize);
         self.setFixedSize(initSize)
         self.reloadPixLayer();
         self.setPixmap(self.pixlayer);
         self.maskUpdate.connect(self.save);
-        self.blankLayer = QPixmap(self.pixlayer.size());
+        self.blankLayer:QPixmap = QPixmap(self.pixlayer.size());
         self.blankLayer.fill(Defaults.blankColor);
         self.tabletErasing = False;
 
@@ -1107,7 +1112,7 @@ class ImageMask(ImageDisplayer,DataObject):
         self.update();
 
     #specifically loads a bitmap from memory and processes an image change, very different from setBitmap()
-    def loadBitmap(self,bmap,fName):
+    def loadBitmap(self,bmap:QBitmap,fName):
         self.fileName = os.path.basename(fName) if fName else None;
         # print(Path(fName).parents)
         if Path(Defaults.workingDirectory) in Path(fName).parents:
@@ -1118,7 +1123,7 @@ class ImageMask(ImageDisplayer,DataObject):
         self.resetUndoStack();
 
     #low-level command, changes loaded bitmap without doing any other intelligence
-    def setBitmap(self,map,update=True):
+    def setBitmap(self,map:QBitmap,update=True):
         self.bitlayer = map;
         self.setFixedSize(self.bitlayer.size());
         self.reloadPixLayer();
@@ -1154,6 +1159,12 @@ class ImageMask(ImageDisplayer,DataObject):
             # names = os.path.splitext(self.fileName);
             # if (names[1][1:].lower() not in QImageWriter.supportedImageFormats()):
             #     saveName = names[0] + Defaults.defaultMaskFormat;
+
+            data = QImageToArray(self.bitlayer,intermediate_format="bmp")
+            print(data)
+            print(data.max())
+            np.save("test.png",data)
+
             self.bitlayer.save(savename); #NOTE: SAVES "inverted" according to windows preview - don't let it confuse you!
             ##NOTE: The numerical values saved by bitlayer.save change depending on the extension. for consistency, all should be saved with the same format.
             if (os.path.exists(Defaults.exportedFlagFile)):
@@ -1161,6 +1172,17 @@ class ImageMask(ImageDisplayer,DataObject):
         else:
             self.error.emit("No mask source loaded, unable to save mask",20000,"mask");
 
+def QImageToArray(incomingImage:Union[QImage,QPixmap],intermediate_format:str="PNG"):
+    '''  Converts a QImage into an opencv/numpy MAT format  '''
+    ba = QByteArray()
+    buff = QBuffer(ba)
+    # Essentially open up a "RAM" file
+    buff.open(QIODevice.OpenModeFlag.ReadWrite)
+    # Store a PNG formatted file into the "RAM" File
+    incomingImage.save(buff, "PNG")
+    import imageio
+    image = imageio.imread(ba.data())
+    return image
 
 class MaskToolbar(QWidget,DataObject): #TODO: Fix second slider handle seeming to jump all the way left after mask revert
     maskRevert = pyqtSignal();
@@ -1597,6 +1619,8 @@ class ImageSelectorPane(QWidget,DataObject):
                     if source:
                         if Defaults.loadMode == LoadMode.skimage:
                             imsave(dest,imread(source),check_contrast=False);
+                        elif Defaults.loadMode == LoadMode.imageio:
+                            imsave(dest,imread(source))
                         elif Defaults.loadMode == LoadMode.biof: #TODO: TEST BF WITH COMPATIBLE COMPUTER
                             data = bf.load_image(source);
                             bf.write_image(dest,data,data.dtype);

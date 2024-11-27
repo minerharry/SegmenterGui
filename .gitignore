@@ -8,5 +8,6 @@ invert_mask.py
 mask_postprocess.py
 random_s4_t63.tif
 session_dat.json
+testing/
 export.flag
 .vscode/
