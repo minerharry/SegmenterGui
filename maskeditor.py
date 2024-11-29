@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from ColorButton import ColorButton
 from enum import Enum
 import parsend
@@ -19,7 +20,7 @@ import shutil
 import json_tricks as json
 import inspect
 import circleutil
-from typing import Any, Union,List,Tuple
+from typing import Any, Optional, Protocol, Union,List,Tuple, cast
 from skimage.transform import resize
 from skimage.exposure import rescale_intensity
 from pathlib import Path
@@ -88,7 +89,9 @@ elif Defaults.loadMode == LoadMode.skimage:
     raise DeprecationWarning("skimage imread/imsave is deprecated! Please use imageio.")
     from skimage.io import imread,imsave
 else:
-    from imageio import imread,imsave
+    from imageio.v3 import imread,imwrite as imsave
+
+
 
 
 class DataObject: #basic implementation of object data loading/saving
@@ -179,81 +182,67 @@ class CursorLoader:
             self.delegate.update();
 
 class MaskSegmenter(QSplitter,DataObject):
-    def __init__(self,window,status=None,parent=None):
+    def __init__(self,window,status=None,parent=None,customData:Union["IOModule",None]=None,session:Union[str,None]=Defaults.sessionFileName):
         super().__init__(parent);
-        self.createObjects(window,status);
+        self.createObjects(window,statusBar=status,customData=customData,session=session);
     
-    def createObjects(self,window,statusBar=None):
+    def createObjects(self,window,statusBar=None,customData:Union["IOModule",None]=None,session:Union[str,None]=Defaults.sessionFileName):
         self.setFocus();
 
         if not os.path.exists(Defaults.workingDirectory):
             os.mkdir(Defaults.workingDirectory);
 
         self.editor = EditorPane();
-        self.data = DataPane();
+        self.data:IOModule
         self.statusBar:SegmenterStatusBar = statusBar;
 
-        # self.lay = QHBoxLayout();
-        # self.lay.addWidget(self.data);
-        # self.lay.addWidget(self.editor);
-        # self.lay.setStretch(1, 2)
-        # self.setLayout(self.lay);
-        self.addWidget(self.data);
+        self.data = customData if customData else DataPane(Defaults.workingDirectory);
+        self.exitConfirm = self.data.getExitConfirm();
+
+        if self.data.renderInWindow():
+            print(self.data.renderInWindow())
+            print("adding self.data")
+            self.addWidget(self.data);
         self.addWidget(self.editor);
         self.setHandleWidth(20);
         self.setStyleSheet("QSplitterHandle {background-image: black;}")
         
-
         self.ctrl = False;
         self.shift = False;
-
-        self.editor.toolbar.iButtons.increment.connect(self.data.selector.incrementImage);
-        self.data.selector.prepImageChange.connect(self.editor.maskView.maskContainer.prepSwitchImage);
-        self.data.selector.imageChanged.connect(self.editor.toolbar.adjustDialog.imageChanged);
-        self.data.selector.imageChanged.connect(self.editor.maskView.maskContainer.switchImage);
-        self.editor.toolbar.maskRevert.connect(self.data.selector.revertMask);
-        self.data.selector.directoryChanged.connect(self.editor.toolbar.adjustDialog.reset);
-        self.data.selector.directoryChanged.connect(self.editor.maskView.fitImageInView);
-
-        self.exitConfirm = MaskUnexportedDialog(
-            "Warning: You have unexported masks. \nYour changes and session will be saved.",
-            buttonNames=["Exit","Export and Exit"]);
-        self.exitConfirm.exportClicked.connect(self.data.selector.export);
+        
+        self.editor.toolbar.iButtons.increment.connect(self.data.incrementImage);
+        self.data.imageChanged.connect(self.editor.toolbar.adjustDialog.imageChanged);
+        self.data.imageChanged.connect(self.editor.maskView.maskContainer.loadImage);
+        self.data.maskChanged.connect(self.editor.maskView.maskContainer.loadMask);
+        self.editor.maskView.maskContainer.mask.maskSave.connect(self.data.saveMask);
+        self.editor.toolbar.maskRevert.connect(self.data.revertMask);
+        self.data.imageStackChanged.connect(self.editor.toolbar.adjustDialog.reset);
+        self.data.imageStackChanged.connect(self.editor.maskView.fitImageInView);
+        self.data.prepImageChange.connect(self.editor.maskView.maskContainer.prepSwitchImage);
 
         window.installEventFilter(self);
-        self.data.selector.list.installEventFilter(self);
-        self.editor.toolbar.maskCheck.installEventFilter(self);
-        self.editor.toolbar.adjustButton.installEventFilter(self);
-        self.editor.toolbar.exactCheck.installEventFilter(self);
-        self.data.selector.maskDirChooser.browseButton.installEventFilter(self);
-        self.data.selector.imageDirChooser.browseButton.installEventFilter(self);
-        self.data.exportPane.exportButton.installEventFilter(self);
-        self.data.exportPane.clearButton.installEventFilter(self);
-        self.editor.toolbar.colorbuttons.installEventFilter(self)
+        self.editor.installEventFilters(self)
+        self.data.installEventFilters(self)
         QCoreApplication.instance().installEventFilter(self);
 
         ### SESSION SAVING STUFF
         self.autosaveTimer = QTimer(self);
-        self.sessionManager = SessionManager(Defaults.sessionFileName,self);
+        self.sessionManager = SessionManager(session,self);
         self.sessionManager.loadData();
         self.autosaveTimer.timeout.connect(self.sessionManager.saveData)
-        self.data.selector.directoryChanged.connect(self.sessionManager.saveData)
+        self.data.imageStackChanged.connect(self.sessionManager.saveData)
         self.sessionManager.saveData();
         self.autosaveTimer.setInterval(Defaults.autosaveTime);
         self.autosaveTimer.start();
 
-        self.data.selector.workingDirCleared.connect(self.sessionManager.saveData);
+        self.data.ensureImageSelected();
 
         self.sessionManager.error.connect(self.receiveError);
         self.editor.maskView.maskContainer.mask.error.connect(self.receiveError);
         self.editor.maskView.maskContainer.error.connect(self.receiveError);
-        self.data.selector.error.connect(self.receiveError);
+        self.data.error.connect(self.receiveError);
 
-        self.cursor = CursorLoader(1500,self);
-        self.data.selector.exportStart.connect(self.cursor.start);
-        self.data.selector.exportEnd.connect(self.cursor.stop);
-        self.data.selector.exportCanceled.connect(self.cursor.stop);
-        # self.data.selector.imLoadStart.connect(self.cursor.start); TODO: figure out cursor change only if taking a long time
+        # self.data.selector.imLoadStart.connect(self.cursor.start); TODO: implemented cursor change only if taking a long time
         # self.data.selector.imLoadEnd.connect(self.cursor.stop);
         # self.data.selector.imLoadCanceled.connect(self.cursor.stop);
         # self.editor.maskView.maskContainer.rescaleStart.connect(self.cursor.start);
@@ -264,15 +253,9 @@ class MaskSegmenter(QSplitter,DataObject):
             self.sessionManager.saved.connect(self.statusBar.saveMessage);
             if Defaults.penPreview:
                 self.editor.maskView.cursorUpdate.connect(self.statusBar.showCursorPos);
-            self.data.selector.exportTriggered.connect(lambda:self.statusBar.showMessage("Exporting..."));
-            self.data.selector.exportCanceled.connect(lambda: self.statusBar.showMessage("Export Canceled",15000))
-            self.data.selector.exportEnd.connect(lambda: self.statusBar.showMessage("Export Successful",10000))
-            self.data.selector.imLoadTriggered.connect(lambda:self.statusBar.showMessage("Loading Image/Mask..."));
-            self.data.selector.imLoadCanceled.connect(lambda: self.statusBar.showMessage("Image/Mask Loading Failed",15000))
-            self.data.selector.imLoadEnd.connect(lambda: self.statusBar.showMessage("Image/Mask Successfully Loaded",10000))
-            self.editor.maskView.maskContainer.rescaleTriggered.connect(lambda:self.statusBar.showMessage("Rescaling Image Intensity..."));
-            self.editor.maskView.maskContainer.rescaleCanceled.connect(lambda: self.statusBar.showMessage("Image Intensity Rescale Failed",15000))
-            self.editor.maskView.maskContainer.rescaleEnd.connect(lambda: self.statusBar.showMessage("Image Intensity Rescaled Successfully",15000))
+            self.data.signalStatus.connect(self.statusBar.showMessage)
+            self.editor.signalStatus.connect(self.statusBar.showMessage)
+
         
         self.editor.maskView.fitImageInView();
             
@@ -411,10 +394,12 @@ class SessionManager(QObject):
     error = pyqtSignal(str,int,str);
     saved = pyqtSignal();
 
-    def __init__(self,path:os.PathLike,dataSource:DataObject):
+    def __init__(self,path:Union[None,os.PathLike,str],dataSource:DataObject):
         super().__init__();
         self.dataSource = dataSource;
         self.path = path;
+        if self.path is None:
+            return
         print(f"attempting to load session; checking existence of path: {self.path}")
         if os.path.exists(self.path):
             try: 
@@ -430,12 +415,16 @@ class SessionManager(QObject):
             self.data = {};
 
     def loadData(self):
+        if self.path is None:
+            return
         errors = self.dataSource._loadState(self.data);
         if errors:
             for error in errors:
                 print(f"Error in loading data to {error[0]}: {error[3]}");
 
     def saveData(self):
+        if self.path is None:
+            return
         self.saved.emit();
         print('saving...');
         self.data,errors = self.dataSource._getStateData();
@@ -473,9 +462,17 @@ class SessionManager(QObject):
         
 class EditorPane(QWidget,DataObject):
 
+    signalStatus = pyqtSignal([str,int],[str])
+
     def __init__(self,parent=None):
         super().__init__(parent);
         self.createObjects();
+
+    def installEventFilters(self,filter:QObject):
+        self.toolbar.maskCheck.installEventFilter(filter);
+        self.toolbar.adjustButton.installEventFilter(filter);
+        self.toolbar.exactCheck.installEventFilter(filter);
+        self.toolbar.colorbuttons.installEventFilter(filter);
     
     def createObjects(self):
         self.setLayout(QVBoxLayout());
@@ -500,6 +497,11 @@ class EditorPane(QWidget,DataObject):
         self.maskView.maskContainer.imageDataRead.connect(self.toolbar.adjustDialog.loadImageData);
         self.toolbar.colorbuttons.fgColorChanged.connect(self.maskView.maskContainer.mask.setFGColor)
         self.toolbar.colorbuttons.bgColorChanged.connect(self.maskView.maskContainer.mask.setBGColor)
+
+        self.maskView.maskContainer.rescaleTriggered.connect(lambda:self.signalStatus[str].emit("Rescaling Image Intensity..."));
+        self.maskView.maskContainer.rescaleCanceled.connect(lambda: self.signalStatus.emit("Image Intensity Rescale Failed",15000))
+        self.maskView.maskContainer.rescaleEnd.connect(lambda: self.signalStatus.emit("Image Intensity Rescaled Successfully",15000))
+
 
 class MaskedImageView(QGraphicsView,DataObject):
     wheel_factor = 0.1;
@@ -773,63 +775,23 @@ class MaskContainer(QWidget,DataObject):
     def prepSwitchImage(self):
         self.imData = None;
 
-    #switches to a specific image, and loads mask if provided
-    #both image and mask are filenames
-    @pyqtSlot(str,str)
-    def switchImage(self,image=None,maskName=None):
-        print(f"switching image, extant mask: {maskName}")
-        errored = False;
-        if image == "":
-            image = None;
-        if maskName == "":
-            maskName = None;
-        print(f"switching image to Image: {image} and Mask: {maskName}")
-        if image == self.imName:
-            print("image already loaded, reusing image data");
+    def loadImage(self,image:Union[np.ndarray,None]):
+        if image is not None and len(image.shape) > 2 and image.shape[-1] >= 4:
+            raise ValueError("images with alpha channel not supported!")
+        if image is not None:
+            pmap = self.loadPixmap(image);
+            self.image.setPixmap(pmap);
         else:
-            if image is not None:
-                pmap = self.readPixmap(image);
-                self.image.setPixmap(pmap);
-            else:
-                self.imData = None;
-                self.image.setPixmap(QPixmap(Defaults.blankSize));
-                self.image.pixmap().fill(Defaults.blankColor);
-        self.imName = image;
-        # print("pixmap loaded")
+            self.imData = None;
+            self.image.setPixmap(QPixmap(Defaults.blankSize));
+            self.image.pixmap().fill(Defaults.blankColor);
+
         self.image.setFixedSize(self.image.pixmap().size());
         self.setFixedSize(self.image.size());
-        # print("label pmap size:",self.image.pixmap().size())
-        # print(self.image.geometry())
-        # print(self.image.size());
-        if maskName and os.path.exists(maskName):
-            bmap = self.readBitmap(maskName,rsize=(self.image.size() if Defaults.attemptMaskResize else None));
-            print("creating mask from file")
-        else:
-            errored = True;
-            self.error.emit("No existing mask found; creating a blank one",20000,'mask');
-            bmap = QBitmap(self.image.pixmap().size());
-            print(self.image.pixmap().size(),bmap.size())
-            bmap.fill(Defaults.bmapBG);
-            if (Defaults.allowMaskCreation):
-                maskName = image;
-        if bmap.size() != self.image.pixmap().size(): #provided mask and image are of different sizes; create new mask
-            errored = True;
-            self.error.emit("Existing mask file is of a different size than corresponding image, creating a blank one; enable AttemptMaskResize to automatically resize input masks",20000,'mask') #TODO: Make this actually configurable
-            bmap = QBitmap(self.image.pixmap().size());
-            bmap.fill(Defaults.bmapBG);
-        print("Bitmap created, loading...")
-        self.mask.loadBitmap(bmap,maskName);
-        print("Bitmap loaded")
         self.sizeChanged.emit(self.size());
-        if not errored:
-            self.error.emit("",0,'mask')
 
-    def readPixmap(self,image,rintensity=True):
-        self.imData = None;
-        if Defaults.loadMode == LoadMode.biof:
-            self.imData = bf.load_image(image);
-        elif Defaults.loadMode in (LoadMode.skimage,LoadMode.imageio):
-            self.imData = imread(image);
+    def loadPixmap(self,image:np.ndarray,rintensity=True):
+        self.imData = image
         self.imData = rescale_intensity(self.imData,in_range='dtype',out_range=(0.0,1.0));
         self.imageDataRead.emit(self.imData);
         if rintensity:
@@ -882,15 +844,48 @@ class MaskContainer(QWidget,DataObject):
         if self.imRange:
             self.imageRanged.emit(*self.imRange);
 
-    def readBitmap(self,map,rsize=None):
-        if Defaults.loadMode == LoadMode.biof:
-            bitData = bf.load_image(map);
-        elif Defaults.loadMode in (LoadMode.skimage,LoadMode.imageio):
-            bitData = imread(map).astype("uint16");
-            bitData = rescale_intensity(bitData,'image',np.uint16);
-        else:
-            raise NotImplementedError(f"Load mode {Defaults.loadMode} not supported");
 
+
+    #loads mask and identifier
+    def loadMask(self,mask:Union[np.ndarray,None]=None,identifier:Union[str,None]=None):
+        print(f"switching image, mask with identifier {identifier}")
+        errored = False;
+        # print("pixmap loaded")
+        # print("label pmap size:",self.image.pixmap().size())
+        # print(self.image.geometry())
+        # print(self.image.size());
+        if mask is not None:
+            bmap = self.readBitmap(mask,rsize=(self.image.size() if Defaults.attemptMaskResize else None));
+            print("loading mask from data")
+        else:
+            if self.imData is not None: #TODO: IS THIS THE RIGHT CHECK??
+                errored = True;
+                self.error.emit("No existing mask found; creating a blank one",20000,'mask');
+            bmap = QBitmap(self.image.pixmap().size());
+            bmap.fill(Defaults.bmapBG);
+
+        if bmap.size() != self.image.pixmap().size(): #provided mask and image are of different sizes; create new mask
+            errored = True;
+            self.error.emit("Existing mask file is of a different size than corresponding image, creating a blank one; enable AttemptMaskResize to automatically resize input masks",20000,'mask') #TODO: Make this actually configurable
+            bmap = QBitmap(self.image.pixmap().size());
+            bmap.fill(Defaults.bmapBG);
+        print("Bitmap created, loading...")
+        self.mask.loadBitmap(bmap,identifier);
+        print("Bitmap loaded")
+        
+        if not errored:
+            self.error.emit("",0,'mask')
+
+    
+
+    def readBitmap(self,bitData,rsize=None):
+        # if Defaults.loadMode == LoadMode.biof:
+        #     bitData = bf.load_image(map);
+        # elif Defaults.loadMode in (LoadMode.skimage,LoadMode.imageio):
+        #     bitData = imread(map).astype("uint16");
+        #     bitData = rescale_intensity(bitData,'image',np.uint16);
+        # else:
+        #     raise NotImplementedError(f"Load mode {Defaults.loadMode} not supported");
 
         if (rsize):
             print("resizing")
@@ -917,9 +912,9 @@ class MaskContainer(QWidget,DataObject):
 class ImageDisplayer(QWidget): #using this instead of QLabel prevents it from scaling up my pixmaps (!??!?) and stops anti-aliasing
     def __init__(self,parent=None):
         super().__init__(parent);
-        self.image = None;
+        self.image:QPixmap = None;
 
-    def setPixmap(self,pmap):
+    def setPixmap(self,pmap:QPixmap):
         self.image = pmap;
         # print("pixmap set")
         super().update();
@@ -938,6 +933,8 @@ class ImageMask(ImageDisplayer,DataObject):
     cursorMove = pyqtSignal(object); #[QPointF, None] are the options
     draggingStart = pyqtSignal();
     draggingEnd = pyqtSignal();
+    
+    maskSave = pyqtSignal(np.ndarray,object) #data, identifier
 
     def __init__(self,parent):
         super().__init__(parent);
@@ -953,7 +950,7 @@ class ImageMask(ImageDisplayer,DataObject):
 
     def createObjects(self,initSize=Defaults.blankSize):
         self.pixVisible = True;
-        self.fileName = None;
+        self.maskName = None;
         self.fgColor = Defaults.defaultFG;
         self.bgColor = Defaults.defaultBG;
         self.pen = QPen(self.fgColor,Defaults.defaultBrushSize,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap,Qt.PenJoinStyle.RoundJoin);
@@ -980,13 +977,13 @@ class ImageMask(ImageDisplayer,DataObject):
             self.setPixmap(self.blankLayer);
 
     def resetUndoStack(self):
-        self.undoStates = [self.bitlayer.copy()];
+        self.undoStates:list[QBitmap] = [cast(QBitmap,self.bitlayer.copy())];
         self.lastBitId = 0;
-        self.undoIds = [self.lastBitId];
+        self.undoIds:list[int] = [self.lastBitId];
         self.undoIndex = 0;
 
     def pushUndoStack(self):
-        self.undoStates = [self.bitlayer.copy()] + self.undoStates[self.undoIndex:];
+        self.undoStates = [cast(QBitmap,self.bitlayer.copy())] + self.undoStates[self.undoIndex:];
         self.lastBitId += 1;
         self.undoIds = [self.lastBitId] + self.undoIds[self.undoIndex:];
         self.undoIndex = 0;
@@ -996,7 +993,7 @@ class ImageMask(ImageDisplayer,DataObject):
         print("undo triggered")
         if (self.undoIndex<len(self.undoStates)-1):
             self.undoIndex += 1;
-            self.setBitmap(self.undoStates[self.undoIndex].copy());
+            self.setBitmap(cast(QBitmap,self.undoStates[self.undoIndex].copy()));
             print("undone")
 
     @pyqtSlot()
@@ -1004,7 +1001,7 @@ class ImageMask(ImageDisplayer,DataObject):
         print("redo triggered")
         if (self.undoIndex > 0):
             self.undoIndex -= 1;
-            self.setBitmap(self.undoStates[self.undoIndex].copy());
+            self.setBitmap(cast(QBitmap,self.undoStates[self.undoIndex].copy()));
             print("redone")
 
     def setTabletErasing(self,erase):
@@ -1112,13 +1109,9 @@ class ImageMask(ImageDisplayer,DataObject):
         self.update();
 
     #specifically loads a bitmap from memory and processes an image change, very different from setBitmap()
-    def loadBitmap(self,bmap:QBitmap,fName):
-        self.fileName = os.path.basename(fName) if fName else None;
-        # print(Path(fName).parents)
-        if Path(Defaults.workingDirectory) in Path(fName).parents:
-            print(f"selected mask {fName} in working directory, splitting")
-            self.fileName = os.path.splitext(self.fileName)[0] #working directory files have extra extension, ignore for saving purposes
-        print("Loading mask with filename: " + str(self.fileName));
+    def loadBitmap(self,bmap:QBitmap,identifier):
+        print(f"loading bitmap with name: {identifier}")
+        self.maskName = identifier
         self.setBitmap(bmap,update=False);
         self.resetUndoStack();
 
@@ -1150,25 +1143,11 @@ class ImageMask(ImageDisplayer,DataObject):
     
     @pyqtSlot()
     def save(self):
-        if (self.fileName is not None):
-            
-            savename = Defaults.workingDirectory+self.fileName+Defaults.defaultMaskFormat
-            print(f"attempting save mask contents to {savename}");
-
-            # saveName = self.fileName + Defaults.defaultMaskFormat;
-            # names = os.path.splitext(self.fileName);
-            # if (names[1][1:].lower() not in QImageWriter.supportedImageFormats()):
-            #     saveName = names[0] + Defaults.defaultMaskFormat;
-
+        if (self.maskName is not None):
+            print(f"mask {self.maskName} save triggered");
             data = QImageToArray(self.bitlayer,intermediate_format="bmp")
-            print(data)
-            print(data.max())
-            np.save("test.png",data)
+            self.maskSave.emit(data,self.maskName)
 
-            self.bitlayer.save(savename); #NOTE: SAVES "inverted" according to windows preview - don't let it confuse you!
-            ##NOTE: The numerical values saved by bitlayer.save change depending on the extension. for consistency, all should be saved with the same format.
-            if (os.path.exists(Defaults.exportedFlagFile)):
-                os.remove(Defaults.exportedFlagFile)
         else:
             self.error.emit("No mask source loaded, unable to save mask",20000,"mask");
 
@@ -1490,18 +1469,82 @@ class ZoomButtons(QWidget,DataObject):
     def displayZoom(self,zoom):
         self.zoomDisplay.setText(f"{round(zoom,2)*100}%")
 
+class Executable(Protocol):
+    def exec(self)->int: ...
+
+class SimpleExecutable():
+    def exec(self)->int:
+        return 1
+
+class IOModule(QWidget,DataObject):
+    # __metaclass__ = CooperativeMeta
+    imageChanged = pyqtSignal(object) #data
+    maskChanged = pyqtSignal(object,object) #data,identifier
+    imageStackChanged = pyqtSignal(str,str)
+    prepImageChange = pyqtSignal()
+    error = pyqtSignal(str,int,str)
+    signalStatus = pyqtSignal([str,int],[str])
+
+    @abstractmethod
+    def saveMask(self,mask:np.ndarray,identifier:object)->None: ...
+
+    @abstractmethod
+    def incrementImage(self,inc)->None: ...
+
+    @abstractmethod
+    def revertMask(self)->None: ...
+
+    @abstractmethod
+    def clearAllMasks(self)->None: ...
+
+    @abstractmethod
+    def installEventFilters(self,filter:QObject)->None:...
+
+    @abstractmethod
+    def ensureImageSelected(self)->None:...
+
+    def renderInWindow(self)->bool:
+        return True;
+
+    def getExitConfirm(self)->Union[QDialog,Executable]:
+        return SimpleExecutable();
+
+class DataPane(IOModule):
+    
+    def saveMask(self, mask: np.ndarray, identifier: str) -> None:
+        self.selector.saveMask(mask,identifier);
+
+    def incrementImage(self, inc) -> None:
+        self.selector.incrementImage(inc);
+
+    def revertMask(self) -> None:
+        return self.selector.revertMask()
+
+    def clearAllMasks(self) -> None:
+        return self.selector.clearWorkingDir()
+
+    def __init__(self,workingDirectory,parent=None):
+        super().__init__(parent);
+        self.createObjects(workingDirectory);
+
+
+    def installEventFilters(self,filter:QObject):
+        self.selector.list.installEventFilter(filter);
+        self.selector.maskDirChooser.browseButton.installEventFilter(filter);
+        self.selector.imageDirChooser.browseButton.installEventFilter(filter);
+        self.exportPane.exportButton.installEventFilter(filter);
+        self.exportPane.clearButton.installEventFilter(filter);
         
 
-class DataPane(QWidget,DataObject):
-
-    def __init__(self,parent=None):
-        super().__init__(parent);
-        self.createObjects();
-
-    def createObjects(self):
+    def createObjects(self,workingDirectory):
         self.exportPane = ExportPanel();
-        self.selector = ImageSelectorPane(self.exportPane);
+        self.selector = ImageSelectorPane(workingDirectory,export=self.exportPane,parent=self);
 
+        self.selector.imageChanged.connect(self.imageChanged.emit);
+        self.selector.maskChanged.connect(self.maskChanged.emit);
+        self.selector.directoryChanged.connect(self.imageStackChanged.emit);
+        self.selector.prepImageChange.connect(self.prepImageChange.emit);
+        self.selector.error.connect(self.error.emit);
 
         self.lay = QVBoxLayout();
         self.lay.addWidget(self.selector);
@@ -1513,6 +1556,30 @@ class DataPane(QWidget,DataObject):
         self.exportPane.clearDir.connect(self.selector.changeImage);
         self.exportPane.exportActivated.connect(self.selector.export);
 
+        self.cursor = CursorLoader(1500,self);
+        self.selector.exportStart.connect(self.cursor.start);
+        self.selector.exportEnd.connect(self.cursor.stop);
+        self.selector.exportCanceled.connect(self.cursor.stop);
+
+
+        self.selector.exportTriggered.connect(lambda:self.signalStatus[str].emit("Exporting..."));
+        self.selector.exportCanceled.connect(lambda: self.signalStatus.emit("Export Canceled",15000))
+        self.selector.exportEnd.connect(lambda: self.signalStatus.emit("Export Successful",10000))
+        self.selector.imLoadTriggered.connect(lambda:self.signalStatus[str].emit("Loading Image/Mask..."));
+        self.selector.imLoadCanceled.connect(lambda: self.signalStatus.emit("Image/Mask Loading Failed",15000))
+        self.selector.imLoadEnd.connect(lambda: self.signalStatus.emit("Image/Mask Successfully Loaded",10000))
+
+        self.exportConfirm = MaskUnexportedDialog(workingDirectory,
+                "Warning: You have unexported masks. \nYour changes and session will be saved.",
+                buttonNames=["Exit","Export and Exit"]);
+        self.exportConfirm.exportClicked.connect(self.selector.export);
+
+    def getExitConfirm(self):
+        return self.exportConfirm;
+
+    def ensureImageSelected(self) -> None:
+        return self.selector.ensureImageSelected();
+
 class ImageDirectoryWatcher(FileSystemEventHandler,QObject):
     directoryModified = pyqtSignal(FileSystemEvent);
     directoryRemoved = pyqtSignal();
@@ -1523,13 +1590,40 @@ class ImageDirectoryWatcher(FileSystemEventHandler,QObject):
         else:
             self.directoryModified.emit(event);
 
+class CooperativeMeta(type):
+    combined_metas:list
+    def __new__(cls, name, bases, members):
+        #collect up the metaclasses
+        metas = [type(base) for base in bases]
+
+        print(metas)
+
+        # prune repeated or conflicting entries
+        metas = [meta for index, meta in enumerate(metas)
+            if not [later for later in metas[index+1:]
+                if issubclass(later, meta)]]
+
+        # whip up the actual combined meta class derive off all of these
+        meta = type(name, tuple(metas), dict(combined_metas = metas))
+
+        # make the actual object
+        return meta(name, bases, members)
+
+    def __init__(self, name, bases, members):
+        for meta in self.combined_metas:
+            meta.__init__(self, name, bases, members)
+
+
 
 #TODO: disallow (or give warning) for selecting the working directory as your image directory
 class ImageSelectorPane(QWidget,DataObject):
+
+    imageChanged = pyqtSignal(object) #data
+    maskChanged = pyqtSignal(object,object) #data,identifier
+
     error = pyqtSignal(str,int,str);
     directoryChanged = pyqtSignal(str,str); #image directory, mask directory
     prepImageChange = pyqtSignal();
-    imageChanged = pyqtSignal(str,str); #image file, mask file
     workingDirCleared = pyqtSignal();
     exportTriggered = pyqtSignal();
     exportStart = pyqtSignal();
@@ -1540,15 +1634,16 @@ class ImageSelectorPane(QWidget,DataObject):
     imLoadCanceled = pyqtSignal();
     imLoadEnd = pyqtSignal();
 
-    def __init__(self,export=None,parent=None):
+    def __init__(self,workingDirectory:str,export=None,parent=None):
         super().__init__(parent);
+        self.workingDirectory = workingDirectory;
         self.createObjects(export);
 
     def createObjects(self,export): 
-        self.importConfirm = MaskUnexportedDialog(
+        self.importConfirm = MaskUnexportedDialog(self.workingDirectory,
             "Warning: You have unexported masks. \nImporting new masks will overwrite the current changes. \nContinue?",
             buttonNames=["Overwrite Masks","Export Unsaved Masks"]); #TODO: Add "Transfer" option to transfer current working masks to new image directory
-        self.imageChangeConfirm = MaskUnexportedDialog(
+        self.imageChangeConfirm = MaskUnexportedDialog(self.workingDirectory,
             "Warning: You have unexported masks. \nLoading a new image directory will overwrite the current changes. \nContinue?",
             buttonNames=["Overwrite Masks","Export Unsaved Masks"]);
         self.imageDirChooser = DirectorySelector(title="Select Image Directory:",dialog=self.imageChangeConfirm);
@@ -1556,6 +1651,9 @@ class ImageSelectorPane(QWidget,DataObject):
         self.importConfirm.exportClicked.connect(self.export)
         self.imageChangeConfirm.exportClicked.connect(self.export)
         self.exportPane = export;
+
+        self.currentImage = None;
+        self.currentMask = None;
         
         self.list = QListView();
         self.list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection);
@@ -1641,14 +1739,14 @@ class ImageSelectorPane(QWidget,DataObject):
 
 
     @pyqtSlot()
-    def revertMask(self):
+    def revertMask(self,maskName:str):
         print("Reverting mask");
-        if self.imageDirChooser.dire and (self.maskDirChooser.dire or Defaults.allowMaskCreation):
-            imName = self.getSelectedImageName()
-            baseName = os.path.splitext(imName)[0];
-            workingFiles = os.listdir(Defaults.workingDirectory);
-            workingMasks = list(filter(lambda x: x.startswith(baseName+".") and x.lower().endswith(tuple(Defaults.supportedMaskExts)),workingFiles));
-            maskName = (Defaults.workingDirectory + workingMasks[0]) if len(workingMasks) > 0 else None;
+        if self.imageDirChooser.dire and (self.maskDirChooser.dire or Defaults.allowMaskCreation) and maskName is not None:
+            # imName = self.getSelectedImageName()
+            # baseName = os.path.splitext(imName)[0];
+            # workingFiles = os.listdir(self.workingDirectory);
+            # workingMasks = list(filter(lambda x: x.startswith(baseName+".") and x.lower().endswith(tuple(Defaults.supportedMaskExts)),workingFiles));
+            maskName = self.workingDirectory + maskName + Defaults.defaultMaskFormat;
             if maskName and os.path.exists(maskName):
                 os.remove(maskName);
                 if (os.path.exists(Defaults.exportedFlagFile)):
@@ -1666,7 +1764,7 @@ class ImageSelectorPane(QWidget,DataObject):
             return [];
         
         imagenames = self.model.stringList();
-        workingMasks = list(filter(lambda x: x.lower().endswith(tuple(Defaults.supportedMaskExts)),os.listdir(Defaults.workingDirectory)));
+        workingMasks = list(filter(lambda x: x.lower().endswith(tuple(Defaults.supportedMaskExts)),os.listdir(self.workingDirectory)));
         originalMasks = list(filter(lambda x: x.lower().endswith(tuple(Defaults.supportedMaskExts)),os.listdir(self.maskDirChooser.dire))) if self.maskDirChooser.dire else [];
 
         print(f"getting all masks... lengths: {len(imagenames)}, {len(workingMasks)}, {len(originalMasks)}")
@@ -1678,13 +1776,13 @@ class ImageSelectorPane(QWidget,DataObject):
             original = list(filter(lambda x:x.startswith(base+"."),originalMasks));
             if len(working) > 0 and len(original) > 0:
                 ##export from working directory
-                result.append((Defaults.workingDirectory + working[0],original[0]));
+                result.append((self.workingDirectory + working[0],original[0]));
             elif len(working) > 0:
                 #no originals, but working directory, so mask creation
                 if Defaults.convertUnassignedMasks and self.exportPane is not None and includeModify:
-                    result.append((Defaults.workingDirectory + working[0],os.path.splitext(os.path.splitext(working[0])[0])[0]+self.exportPane.maskExt()));
+                    result.append((self.workingDirectory + working[0],os.path.splitext(os.path.splitext(working[0])[0])[0]+self.exportPane.maskExt()));
                 else:
-                    result.append((Defaults.workingDirectory + working[0],os.path.splitext(working[0])[0]));
+                    result.append((self.workingDirectory + working[0],os.path.splitext(working[0])[0]));
             elif len(original) > 0:
                 result.append((Path(self.maskDirChooser.dire)/original[0],original[0]));
             elif Defaults.createEmptyMasksForExport and includeModify:
@@ -1776,22 +1874,27 @@ class ImageSelectorPane(QWidget,DataObject):
 
     def clearWorkingDir(self): #TODO: Make separate object for working dir management, make this a signal instead
         print("Beep boop clearing working directory");
-        for file in os.scandir(Defaults.workingDirectory):
+        for file in os.scandir(self.workingDirectory):
             os.remove(file.path);
         self.workingDirCleared.emit();
+
+    def ensureImageSelected(self):
+        if not self.currentImage and self.imageDirChooser.dire:
+            self.changeImage(); #TODO: Check if it works
 
     def changeImage(self,row=None):
         self.imLoadTriggered.emit();
         self.repaint();
-        #method is called with the assumption that the masks in Defaults.workingDirectory are the priority;
+        #method is called with the assumption that the masks in self.workingDirectory are the priority;
         #if the mask dir has been changed / selected, the import of those masks should happen *first*
-        if (type(row) == QtCore.QModelIndex):
+        if (isinstance(row,QtCore.QModelIndex)):
             row = row.row();
         if self.imageDirChooser.dire and self.imageDirChooser.dire != '':
             if len(self.model.stringList()) <= 0: #directory has no images
                 print("Empty image directory, prematurely emitted")
                 self.prepImageChange.emit();
-                self.imageChanged.emit(None,None);
+                self.imageChanged.emit(None);
+                self.maskChanged.emit(None,None);
                 return;
             imName = self.getSelectedImageName(row)
             imagePath = Path(self.imageDirChooser.dire)/imName;
@@ -1799,13 +1902,13 @@ class ImageSelectorPane(QWidget,DataObject):
             if self.maskDirChooser.dire or Defaults.allowMaskCreation:
                 baseName = os.path.splitext(imName)[0];
                 print(f"looking for mask with basename: {baseName}");
-                workingFiles = os.listdir(Defaults.workingDirectory);
+                workingFiles = os.listdir(self.workingDirectory);
                 #print(f"Working files: {workingFiles}");
                 workingMasks = list(filter(lambda x: x.startswith(imName) and x.lower().endswith(tuple(Defaults.supportedMaskExts)),workingFiles));
                 #print(f"Working Masks: {workingMasks}")
                 maskName = workingMasks[0] if len(workingMasks) > 0 else None;
                 if maskName:
-                    maskPath = (Defaults.workingDirectory+maskName);
+                    maskPath = (self.workingDirectory+maskName);
                 elif self.maskDirChooser.dire:
                     maskfiles = os.listdir(self.maskDirChooser.dire);
                     goodMasks = list(filter(lambda x: x.startswith(baseName+".") and x.lower().endswith(tuple(Defaults.supportedMaskExts)),maskfiles));
@@ -1816,9 +1919,64 @@ class ImageSelectorPane(QWidget,DataObject):
                         maskPath = (Path(self.maskDirChooser.dire)/maskName);
             self.imLoadStart.emit()
             self.repaint();
-            self.prepImageChange.emit();    
-            self.imageChanged.emit(str(imagePath),str(maskPath));
+
+
+            imagePath = str(imagePath) if imagePath else None
+            maskPath = str(maskPath) if maskPath else None
+
+            print(f"selected image with path {imagePath} and mask with path {maskPath}")
+
+            if self.currentImage != imagePath:
+                self.currentImage = imagePath;
+                self.prepImageChange.emit();
+                print("reading image data from path",imagePath)
+                imData = self.readImage(imagePath) if imagePath else None
+                self.imageChanged.emit(imData);
+
+
+            #get proper mask filename
+
+
+            if self.currentMask != maskPath or maskPath is None: #still want to reset if None->None
+                self.currentMask = maskPath;
+                
+                if maskPath:
+                    path = Path(maskPath)
+                    if Path(self.workingDirectory) in path.parents:
+                        path = path.with_suffix("");
+                    maskName = path.name
+                    print("reading mask data from path",maskPath)
+                    maskData = self.readMask(maskPath)
+                    self.maskChanged.emit(maskData,maskName)
+                else:
+                    maskName = os.path.basename(self.currentImage)
+                    self.maskChanged.emit(None,maskName)
+                
+
             self.imLoadEnd.emit()
+
+    def readImage(self,filename:str)->np.ndarray:
+        try:
+            if Defaults.loadMode == LoadMode.biof:
+                imData = bf.load_image(filename);
+            elif Defaults.loadMode in (LoadMode.skimage,LoadMode.imageio):
+                imData = imread(filename);
+            else:
+                raise ValueError(Defaults.loadMode)
+        except Exception as e:
+            raise Exception(f"Error when reading file: {filename}") from e
+        return imData
+
+    def readMask(self,filename:str)->np.ndarray:
+        if Defaults.loadMode == LoadMode.biof:
+            bitData = bf.load_image(filename);
+        elif Defaults.loadMode in (LoadMode.skimage,LoadMode.imageio):
+            bitData = imread(filename).astype("uint16");
+            bitData = rescale_intensity(bitData,'image',np.uint16);
+        else:
+            raise NotImplementedError(f"Load mode {Defaults.loadMode} not supported");
+        return bitData
+
 
     def getSelectedImageName(self,row=None):
         return self.model.stringList()[row if row else self.list.currentIndex().row()];
@@ -1831,6 +1989,22 @@ class ImageSelectorPane(QWidget,DataObject):
     def incrementImage(self,inc):
         if len(self.model.stringList()) > 0:
             self.selectImage(max(0,min(self.list.currentIndex().row()+inc,len(self.model.stringList())-1)));
+
+
+    def saveMask(self, mask: np.ndarray, identifier: str) -> None:
+        #remember: identifier is the path to the **source** mask. Goal: Save to the working dir
+
+        assert mask is not None
+        assert identifier, identifier
+        
+    
+        working_path = self.workingDirectory + identifier + Defaults.defaultMaskFormat
+
+        print(f"saving mask with name {identifier} to filename {working_path}")
+
+        imsave(working_path,mask) #TODO: TEST!
+        if (os.path.exists(Defaults.exportedFlagFile)):
+                os.remove(Defaults.exportedFlagFile)
 
     def getSaveData(self):
         return {"row":self.list.currentIndex().row(),"image_dir":self.imageDirChooser.dire,"mask_dir":self.maskDirChooser.dire};
@@ -1933,13 +2107,14 @@ class DirectorySelector(QWidget):
 
 
 class MaskUnexportedDialog(QDialog):
-    exportClicked = pyqtSignal(object)#function
+    exportClicked = pyqtSignal(object) #function
     
-    def __init__(self,desc,buttonNames=["Exit, don't export","Export and exit"]):
+    def __init__(self,workingDirectory,desc,buttonNames=["Exit, don't export","Export and exit"]):
         super().__init__();
-        self.createObjects(desc,buttonNames);
+        self.createObjects(workingDirectory,desc,buttonNames);
 
-    def createObjects(self,desc,bNames):
+    def createObjects(self,workingDirectory,desc,bNames):
+        self.workingDirectory=workingDirectory;
         self.setWindowTitle("Warning: Unexported Masks");
         self.lay = QGridLayout();
 
@@ -1972,7 +2147,7 @@ class MaskUnexportedDialog(QDialog):
             return True;
 
     def unexportedMasks(self):
-        workingDirNonempty = any(os.scandir(Defaults.workingDirectory));
+        workingDirNonempty = any(os.scandir(self.workingDirectory));
         noFlag = not(os.path.exists(Defaults.exportedFlagFile));
         return workingDirNonempty and noFlag;
         
@@ -2181,6 +2356,7 @@ class AdjustmentDialog(QDialog,DataObject): #TODO: Make it clear that pixel inte
     def getSaveData(self):
         return self.persistent();
 
+
 class HistogramAdjustWidget(QWidget,DataObject,RangeComponent):
 
     def __init__(self):
@@ -2197,7 +2373,7 @@ class HistogramAdjustWidget(QWidget,DataObject,RangeComponent):
             print("Warning: no range provided to histogram, recalculating... calculated range:",range)
 
         else:
-            print("range provided:",range)
+            print("Adjustment Dialog: Image range provided",range)
         self.xAxis.setRange(*range);
         self.yAxis.setRange(np.min(hist),np.max(hist));
 
@@ -2478,12 +2654,139 @@ class QStringListValidator(QValidator):
                 return (QValidator.State.Intermediate,inputText,pos);
         return (QValidator.State.Invalid,inputText,pos);
 
+
+
+
+class ImageStackIOPane(IOModule):
+
+    def __init__(self, parent: Optional['QWidget'] = None) -> None:
+        super().__init__(parent)
+        self.imageStack:Union[np.ndarray,None] = None
+        self.sourceMasks:Union[np.ndarray,None] = None
+        self.workingMasks:Union[dict[int,np.ndarray],None] = None
+        self.currentIndex = 0;
+
+    def loadImageStack(self,imageStack:Union[np.ndarray,None],masks:Union[np.ndarray,None]=None):
+        if imageStack is not None and masks is not None: assert len(imageStack) == len(masks);
+        self.imageStack = imageStack;
+        self.sourceMasks = masks;
+        self.workingMasks = {};
+        self.currentIndex = 0;
+
+    def loadMaskStack(self,masks:Union[np.ndarray,None]=None):
+        if self.imageStack is not None and masks is not None:
+            assert len(self.imageStack) == len(masks)
+        self.sourceMasks = masks;
+        self.workingMasks = {};
+
+    def createObjects(self):
+        self.setFixedWidth(0)
+        self.setMaximumWidth(0)
+        pass
+
+    def selectImage(self,idx:int):
+        assert self.imageStack is not None
+        assert self.workingMasks is not None
+        if self.currentIndex != idx:
+            self.imageChanged.emit(self.imageStack[idx])
+        self.currentIndex = idx
+        mask = self.workingMasks.get(idx,None)
+        self.maskChanged.emit(mask if mask is not None else (self.sourceMasks[idx] if self.sourceMasks is not None else None),idx)
+
+
+    def saveMask(self, mask: np.ndarray, identifier: int) -> None:
+        assert self.workingMasks is not None
+        self.workingMasks[identifier] = mask
+
+    def incrementImage(self, inc) -> None:
+        if self.imageStack is None:
+            return;
+        self.selectImage(min(max(self.currentIndex + inc,0),len(self.imageStack)-1))
+
+    def revertMask(self) -> None:
+        assert self.workingMasks is not None
+        del self.workingMasks[self.currentIndex]
+
+    def clearAllMasks(self) -> None:
+        self.workingMasks = {}
+
+    def installEventFilters(self, filter: QObject) -> None:
+        pass;
+
+    def export(self)->Union[np.ndarray,None]:        
+        assert self.imageStack is not None;
+        if self.workingMasks is None: #changes were rejected
+            # print("Changes rejected, returning None")
+            return self.workingMasks;
+        arr = self.sourceMasks.copy() if self.sourceMasks else np.zeros(self.imageStack.shape[:3]);
+        for num,mask in self.workingMasks.items():
+            arr[num] = mask;
+        return arr
+
+    def getExitConfirm(self) -> Union[QDialog, Executable]:
+        self.changesDialog = AcceptChangesDialog("Accepting will export all changes to the external application.\nRejecting will undo all changes and return you to the external application.\nCancel to keep editing.");
+        self.changesDialog.finished.connect(self.prepareExit);
+        return self.changesDialog;
+        
+    def prepareExit(self,code):
+        print("Dialog closed")
+        if code == AcceptChangesDialog.ChangeSignal.exit_reject:
+            self.workingMasks = None; #mask working masks as rejected before exiting
+
+    
+    def renderInWindow(self):
+        return False
+
+    def ensureImageSelected(self):
+        self.selectImage(self.currentIndex)
+
+
+class AcceptChangesDialog(QDialog):
+
+    class ChangeSignal:
+        exit_accept = 1;
+        exit_reject = 2;
+        cancel = 0;
+    
+    def __init__(self,desc,buttonNames=["Accept changes and exit","Reject changes and stop editing","Keep editing"]):
+        super().__init__();
+        self.createObjects(desc,buttonNames);
+
+    def createObjects(self,desc,buttonNames):
+        self.setWindowTitle("Accept changes and exit?");
+        self.lay = QGridLayout();
+
+        self.descLabel = QLabel(desc);
+        self.acceptButton = QPushButton(buttonNames[0]);
+        self.rejectButton = QPushButton(buttonNames[1])
+        self.cancelButton = QPushButton(buttonNames[2]);
+
+        self.lay.addWidget(self.descLabel,0,0,1,3);
+        self.lay.addWidget(self.acceptButton,1,0)
+        self.lay.addWidget(self.rejectButton,1,1)
+        self.lay.addWidget(self.cancelButton,1,2);
+        self.setLayout(self.lay);
+
+        self.acceptButton.clicked.connect(self.exitAndAccept);
+        self.rejectButton.clicked.connect(self.exitAndReject);
+        self.cancelButton.clicked.connect(self.reject);
+
+        self.acceptButton.setDefault(True);
+
+    def exitAndAccept(self):
+        self.done(self.ChangeSignal.exit_accept)
+        
+    def exitAndReject(self):
+        self.done(self.ChangeSignal.exit_reject)
+
+
+
 class QMainSegmentWindow(QMainWindow,DataObject):
-    def __init__(self):
+    def __init__(self,customDataModule:Union[IOModule,None]=None,session:Union[str,None]=Defaults.sessionFileName):
         super().__init__();
         self.setStatusBar(SegmenterStatusBar());
         self.setWindowTitle("Mask Editor v0.4");
-        self.segmenter = MaskSegmenter(self,parent=self,status=self.statusBar());
+        self.segmenter = MaskSegmenter(self,parent=self,status=self.statusBar(),customData=customDataModule,session=session);
         self.setCentralWidget(self.segmenter);
         self.createActions();
 
@@ -2539,15 +2842,16 @@ class QMainSegmentWindow(QMainWindow,DataObject):
         self.zoomInAction.setShortcuts([QKeySequence.StandardKey.ZoomIn,QKeySequence("Ctrl+=")])
         self.zoomOutAction.setShortcut(QKeySequence.StandardKey.ZoomOut)
 
-        self.prevAction.triggered.connect(lambda: self.segmenter.data.selector.incrementImage(-1));
-        self.nextAction.triggered.connect(lambda: self.segmenter.data.selector.incrementImage(1));
+        self.prevAction.triggered.connect(lambda: self.segmenter.data.incrementImage(-1));
+        self.nextAction.triggered.connect(lambda: self.segmenter.data.incrementImage(1));
         self.increaseAction.triggered.connect(lambda: self.segmenter.editor.toolbar.slider.triggerAction(QAbstractSlider.SliderAction.SliderSingleStepAdd));
         self.decreaseAction.triggered.connect(lambda: self.segmenter.editor.toolbar.slider.triggerAction(QAbstractSlider.SliderAction.SliderSingleStepSub));
         self.undoAction.triggered.connect(self.segmenter.editor.maskView.maskContainer.mask.undo);
         self.redoAction.triggered.connect(self.segmenter.editor.maskView.maskContainer.mask.redo);
-        self.exportAction.triggered.connect(self.segmenter.data.selector.export);
-        self.imageDirAction.triggered.connect(self.segmenter.data.selector.imageDirChooser.checkDialog);
-        self.maskDirAction.triggered.connect(self.segmenter.data.selector.maskDirChooser.checkDialog);
+        if isinstance(self.segmenter.data,DataPane):
+            self.exportAction.triggered.connect(self.segmenter.data.selector.export);
+            self.imageDirAction.triggered.connect(self.segmenter.data.selector.imageDirChooser.checkDialog);
+            self.maskDirAction.triggered.connect(self.segmenter.data.selector.maskDirChooser.checkDialog);
         self.exitAction.triggered.connect(self.close);
         self.aboutAction.triggered.connect(self.about);
         self.shortcutsAction.triggered.connect(self.shortcuts);
@@ -2612,6 +2916,15 @@ def init_logger():
             "(Lch/qos/logback/classic/Level;)V",
             logLevel)
 
+
+def editMaskStack(images:np.ndarray,masks:Union[np.ndarray,None])->np.ndarray:
+    app = QApplication([])
+    dataModule = ImageStackIOPane();
+    dataModule.loadImageStack(images,masks);
+    window = QMainSegmentWindow(customDataModule=dataModule,session=None);
+    window.show();
+    app.exec();
+    return dataModule.export()
 
 
 if __name__ == '__main__':
