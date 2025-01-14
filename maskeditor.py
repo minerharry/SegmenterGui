@@ -200,8 +200,6 @@ class MaskSegmenter(QSplitter,DataObject):
         self.exitConfirm = self.data.getExitConfirm();
 
         if self.data.renderInWindow():
-            print(self.data.renderInWindow())
-            print("adding self.data")
             self.addWidget(self.data);
         self.addWidget(self.editor);
         self.setHandleWidth(20);
@@ -270,7 +268,11 @@ class MaskSegmenter(QSplitter,DataObject):
 
     def closeEvent(self, a0: QCloseEvent) -> None:
         if (self.exitConfirm.exec()):
-            self.sessionManager.saveData();
+            try:
+                self.sessionManager.saveData();
+            except Exception as e:
+                print(e)
+                raise e
             return super().closeEvent(a0);
         a0.ignore();
 
@@ -817,14 +819,34 @@ class MaskContainer(QWidget,DataObject):
             type = np.uint8;
         if external:
             self.rescaleStart.emit();
-        print("rescale:",self.overrideRescale)
+        print("Override rescale:",self.overrideRescale)
         if self.overrideRescale:
-            data = rescale_intensity(self.imData,self.overrideRescale,type);
+            data:np.ndarray = rescale_intensity(self.imData,self.overrideRescale,type);
         else:
-            data = rescale_intensity(self.imData,self.imRange,type);
-        im = QImage(data.data, shape[1], shape[0], bytesPerLine, format);
+            print("rescaling image to range " + str(self.imRange))
+            data:np.ndarray = rescale_intensity(self.imData,self.imRange,type);
+            print("image rescaled")
+            print('wow')
+        
+        databytes = data.data.tobytes()
+
+        # import builtins
+        # print("constructing QImage")
+        # print("data.data type:",builtins.type(databytes))
+        # print("dtype:",data.dtype);
+        # print("shape:",shape);
+        # print("bytesPerLine",bytesPerLine);
+        # print("format",format);
+        # print("locals:",locals())
+        
+        try:
+            im = QImage(databytes, shape[1], shape[0], bytesPerLine, format);
+        except Exception as e:
+            print(e);
+            raise e
         # print("im size:",im.size());
         out_pix = QPixmap.fromImage(im);
+        print("QPixmap constructed")
         # print("pix size:",out_pix.size())
         if external:
             self.rescaleEnd.emit();
@@ -894,7 +916,6 @@ class MaskContainer(QWidget,DataObject):
             if (bitData.shape != rsize):
                 bitData = resize(bitData,rsize,anti_aliasing=False);
         
-        print(bitData)
         shape = bitData.shape;
         if len(bitData.shape) > 2:
             if len(bitData.shape) == 3:
@@ -902,8 +923,19 @@ class MaskContainer(QWidget,DataObject):
             else:
                 raise Exception()
 
-        result = QBitmap(QImage(bitData.data, shape[1], shape[0], 2*shape[1], QImage.Format.Format_Grayscale16));
-        print(result)
+        bitData = rescale_intensity(bitData.astype(np.uint16),'image',np.uint16);
+
+        print("constructing bitmap")
+        databytes = bitData.data.tobytes()
+        try:
+            bitImage = QImage(databytes, shape[1], shape[0], 2*shape[1], QImage.Format.Format_Grayscale16);
+            result = QBitmap(bitImage)
+        except Exception as e:
+            print(e);
+            raise e
+        # result = QBitmap();
+        print("bitmap created successfully")
+
         return result
 
     def resizeEvent(self, ev):
@@ -1146,6 +1178,8 @@ class ImageMask(ImageDisplayer,DataObject):
         if (self.maskName is not None):
             print(f"mask {self.maskName} save triggered");
             data = QImageToArray(self.bitlayer,intermediate_format="bmp")
+            if len(data.shape) > 2:
+                data = data[:,:,0];
             self.maskSave.emit(data,self.maskName)
 
         else:
@@ -2664,14 +2698,17 @@ class ImageStackIOPane(IOModule):
         self.imageStack:Union[np.ndarray,None] = None
         self.sourceMasks:Union[np.ndarray,None] = None
         self.workingMasks:Union[dict[int,np.ndarray],None] = None
-        self.currentIndex = 0;
+        self.currentIndex = None;
 
     def loadImageStack(self,imageStack:Union[np.ndarray,None],masks:Union[np.ndarray,None]=None):
         if imageStack is not None and masks is not None: assert len(imageStack) == len(masks);
+        if imageStack is not None:
+            assert len(imageStack) > 0, "Image stack must be nonempty"
+
         self.imageStack = imageStack;
         self.sourceMasks = masks;
         self.workingMasks = {};
-        self.currentIndex = 0;
+        self.currentIndex = None;
 
     def loadMaskStack(self,masks:Union[np.ndarray,None]=None):
         if self.imageStack is not None and masks is not None:
@@ -2688,14 +2725,21 @@ class ImageStackIOPane(IOModule):
         assert self.imageStack is not None
         assert self.workingMasks is not None
         if self.currentIndex != idx:
+            print(f"image selected with index {idx}, with range {np.min(self.imageStack[idx]),np.max(self.imageStack[idx])}");
             self.imageChanged.emit(self.imageStack[idx])
+            print("image selection complete")
         self.currentIndex = idx
         mask = self.workingMasks.get(idx,None)
+        if mask is not None:
+            print(f"found working mask")
         self.maskChanged.emit(mask if mask is not None else (self.sourceMasks[idx] if self.sourceMasks is not None else None),idx)
 
 
     def saveMask(self, mask: np.ndarray, identifier: int) -> None:
         assert self.workingMasks is not None
+        print(f"saving mask with identifier {identifier} to workingMasks dictionary ")
+        if len(mask.shape) > 2:
+            mask = mask[:,:,0]
         self.workingMasks[identifier] = mask
 
     def incrementImage(self, inc) -> None:
@@ -2718,7 +2762,7 @@ class ImageStackIOPane(IOModule):
         if self.workingMasks is None: #changes were rejected
             # print("Changes rejected, returning None")
             return self.workingMasks;
-        arr = self.sourceMasks.copy() if self.sourceMasks else np.zeros(self.imageStack.shape[:3]);
+        arr = self.sourceMasks.copy() if self.sourceMasks is not None else np.zeros(self.imageStack.shape[:3]);
         for num,mask in self.workingMasks.items():
             arr[num] = mask;
         return arr
@@ -2738,7 +2782,8 @@ class ImageStackIOPane(IOModule):
         return False
 
     def ensureImageSelected(self):
-        self.selectImage(self.currentIndex)
+        if self.currentIndex is None:
+            self.selectImage(0);
 
 
 class AcceptChangesDialog(QDialog):
@@ -2917,7 +2962,8 @@ def init_logger():
             logLevel)
 
 
-def editMaskStack(images:np.ndarray,masks:Union[np.ndarray,None])->np.ndarray:
+def editMaskStack(images:np.ndarray,masks:Union[np.ndarray,None])->Union[np.ndarray,None]:
+    print(f"editing images of shape {images.shape}" + (f"with starting masks of shape {masks.shape}" if masks is not None else ""))
     app = QApplication([])
     dataModule = ImageStackIOPane();
     dataModule.loadImageStack(images,masks);
@@ -2926,6 +2972,8 @@ def editMaskStack(images:np.ndarray,masks:Union[np.ndarray,None])->np.ndarray:
     app.exec();
     return dataModule.export()
 
+def unstack(a, axis=0):
+    return np.moveaxis(a, axis, 0)
 
 if __name__ == '__main__':
     if Defaults.loadMode == LoadMode.biof:
