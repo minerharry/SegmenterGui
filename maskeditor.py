@@ -1,4 +1,7 @@
 from abc import ABC, abstractmethod
+from ast import literal_eval
+from copy import copy
+from dataclasses import dataclass
 from ColorButton import ColorButton
 from enum import Enum
 import parsend
@@ -9,7 +12,7 @@ from PyQt6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 from PyQt6.QtWidgets import QAbstractItemView, QAbstractSlider, QApplication, QCheckBox, QComboBox, QCompleter, QDialog, QFileDialog, QGraphicsPathItem, QGraphicsScene, QGraphicsView, QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit, QListView, QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QSlider, QSplitter, QStatusBar, QStyle, QStyleOptionFrame, QToolButton, QVBoxLayout, QWidget, QWhatsThis
 from PyQt6 import QtCore
 from PyQt6.QtCore import QFile, QLineF, QMargins, QMarginsF, QPoint, QPointF, QRect, QRectF, QSignalMapper, QSize, QStringListModel, QTimer, Qt, pyqtSignal, pyqtSlot, QObject, QEvent, QUrl, QCoreApplication, QByteArray, QIODevice, QBuffer
-from PyQt6.QtGui import QAction, QBitmap, QBrush, QCloseEvent, QColor, QCursor, QDoubleValidator, QFontMetrics, QGuiApplication, QIcon, QImage, QImageWriter, QIntValidator, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QPolygon, QPolygonF, QShortcut, QKeySequence, QTextDocument, QTransform, QUndoCommand, QUndoStack, QValidator
+from PyQt6.QtGui import QAction, QBitmap, QBrush, QCloseEvent, QCursor, QDoubleValidator, QFontMetrics, QColor, QGuiApplication, QIcon, QImage, QImageWriter, QIntValidator, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QPolygon, QPolygonF, QShortcut, QKeySequence, QTextDocument, QTransform, QUndoCommand, QUndoStack, QValidator
 import numpy as np
 import math
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
@@ -20,7 +23,7 @@ import shutil
 import json_tricks as json
 import inspect
 import circleutil
-from typing import Any, Optional, Protocol, Union,List,Tuple, cast
+from typing import Any, ClassVar, Optional, Protocol, Union,List,Tuple, cast
 from skimage.transform import resize
 from skimage.exposure import rescale_intensity
 from pathlib import Path
@@ -28,43 +31,11 @@ from tqdm import tqdm
 import webbrowser
 from natsort import natsorted, ns
 
-class LoadMode:
-    biof = 0;
-    skimage = 1;
-    imageio = 2;
-
-class Defaults:
-    bioLogging = False;
-    loadMode = LoadMode.imageio; #TODO: image load error when switching between formats on first load, not reproducible
-    blankSize = QSize(300,300);
-    blankColor = QColor(0,0,0,0);
-    defaultFG = QColor(255,255,255,10)#QColor(255,0,255,50)
-    defaultBG = QColor(70,0,0,60)#QColor(0,255,255,50)
-    bmapFG = Qt.GlobalColor.color0
-    bmapBG = Qt.GlobalColor.color1;
-    defaultBrushSize = 10;
-    maxBrushSliderSize = 80;
-    maxBrushInputSize = 999;
-    filePathMaxLength = 200; #characters
-    drawButtonNames = ("Include", "Exclude");
-    drawButtonsLabel = "Draw Mode";
-    workingDirectory = "working_masks/";
-    sessionFileName = "session_dat.json";
-    supportedImageExts = [".bmp",".png",".jpg",".pbm",".jpeg",".tif",".sld",".aim",".al3d",".gel",".am",".amiramesh",".grey",".hx",".labels",".cif",".img",".hdr",".sif",".afi",".svs",".htd",".pnl",".avi",".arf",".exp",".sdt",".1sc",".pic",".raw",".xml",".scn",".ims",".cr2",".crw",".ch5",".c01",".dib",".dv",".r3d",".dcm",".dicom",".v",".eps",".epsi",".ps",".flex",".mea",".res",".tiff",".fits",".dm3",".dm4",".dm2",".gif",".naf",".his",".vms",".i2i",".ics",".ids",".seq",".ipw",".hed",".mod",".leff",".obf",".msr",".xdce",".frm",".inr",".ipl",".ipm",".dat",".par",".jp2",".jpk",".jpx",".xv",".bip",".fli",".lei",".lif",".scn",".sxm",".l2d",".lim",".stk"]; 
-    supportedMaskExts = supportedImageExts; #TODO: filter list by image formats and not just supported formats
-    autosaveTime = 60*1000; #milliseconds
-    exportedFlagFile = "export.flag";
-    attemptMaskResize = False;
-    penPreview = True;
-    exactPreviewWidth = 0.6;
-    circlePreviewWidth = exactPreviewWidth*5;
-    allowMaskCreation = True;
-    defaultMaskFormat = ".bmp";
-    adjustSigFigs = 4;
-    histSliderPrecision = 100000
-    convertUnassignedMasks = True; #whether to convert masks with no equivalent in the mask source directory to some standard type, and prompt the user of that type
-    createEmptyMasksForExport = False;
-    adjustForcePreview = False;
+from defaults import LoadMode
+try:
+    from custom_defaults import Defaults
+except ImportError:
+    from defaults import Defaults
 
 
 
@@ -741,7 +712,7 @@ class DrawMode:
 
 class MaskContainer(QWidget,DataObject):
     error = pyqtSignal(str,int,str)
-    sizeChanged = pyqtSignal(QSize);
+    sizeChanged = pyqtSignal(QtCore.QSize);
     imageRanged = pyqtSignal(float,float);
     imageDataRead = pyqtSignal(np.ndarray);
 
@@ -763,8 +734,8 @@ class MaskContainer(QWidget,DataObject):
         self.image = ImageDisplayer(self);
         self.mask:ImageMask = ImageMask(self);
 
-        pixmap = QPixmap(Defaults.blankSize);
-        pixmap.fill(Defaults.blankColor);
+        pixmap = QPixmap(QSize(*Defaults.blankSize));
+        pixmap.fill(QColor(Defaults.blankColor));
         self.image.setPixmap(pixmap)
         
         self.iFileName = None;
@@ -785,8 +756,8 @@ class MaskContainer(QWidget,DataObject):
             self.image.setPixmap(pmap);
         else:
             self.imData = None;
-            self.image.setPixmap(QPixmap(Defaults.blankSize));
-            self.image.pixmap().fill(Defaults.blankColor);
+            self.image.setPixmap(QPixmap(QSize(*Defaults.blankSize)));
+            self.image.pixmap().fill(QColor(Defaults.blankColor));
 
         self.image.setFixedSize(self.image.pixmap().size());
         self.setFixedSize(self.image.size());
@@ -884,13 +855,13 @@ class MaskContainer(QWidget,DataObject):
                 errored = True;
                 self.error.emit("No existing mask found; creating a blank one",20000,'mask');
             bmap = QBitmap(self.image.pixmap().size());
-            bmap.fill(Defaults.bmapBG);
+            bmap.fill(ImageMask.bmapBG);
 
         if bmap.size() != self.image.pixmap().size(): #provided mask and image are of different sizes; create new mask
             errored = True;
             self.error.emit("Existing mask file is of a different size than corresponding image, creating a blank one; enable AttemptMaskResize to automatically resize input masks",20000,'mask') #TODO: Make this actually configurable
             bmap = QBitmap(self.image.pixmap().size());
-            bmap.fill(Defaults.bmapBG);
+            bmap.fill(ImageMask.bmapBG);
         print("Bitmap created, loading...")
         self.mask.loadBitmap(bmap,identifier);
         print("Bitmap loaded")
@@ -968,6 +939,10 @@ class ImageMask(ImageDisplayer,DataObject):
     
     maskSave = pyqtSignal(np.ndarray,object) #data, identifier
 
+    bmapFG = Qt.GlobalColor.color0
+    bmapBG = Qt.GlobalColor.color1;
+
+
     def __init__(self,parent):
         super().__init__(parent);
         self.createObjects();
@@ -980,11 +955,11 @@ class ImageMask(ImageDisplayer,DataObject):
             self.setPixmap(self.blankLayer)
         super().update();
 
-    def createObjects(self,initSize=Defaults.blankSize):
+    def createObjects(self,initSize=QSize(*Defaults.blankSize)):
         self.pixVisible = True;
         self.maskName = None;
-        self.fgColor = Defaults.defaultFG;
-        self.bgColor = Defaults.defaultBG;
+        self.fgColor = QColor(Defaults.defaultFG);
+        self.bgColor = QColor(Defaults.defaultBG);
         self.pen = QPen(self.fgColor,Defaults.defaultBrushSize,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap,Qt.PenJoinStyle.RoundJoin);
         self.brush = QBrush(self.fgColor);
         self.drawMode = DrawMode.INCLUDE;
@@ -996,7 +971,7 @@ class ImageMask(ImageDisplayer,DataObject):
         self.setPixmap(self.pixlayer);
         self.maskUpdate.connect(self.save);
         self.blankLayer:QPixmap = QPixmap(self.pixlayer.size());
-        self.blankLayer.fill(Defaults.blankColor);
+        self.blankLayer.fill(QColor(Defaults.blankColor));
         self.tabletErasing = False;
 
         self.resetUndoStack();#new states added to the end; lower number is more recent
@@ -1076,6 +1051,7 @@ class ImageMask(ImageDisplayer,DataObject):
         else:
             self.pen.setColor(bitcolors[self.drawMode]);
             bitpainter.setPen(self.pen);
+            assert self.lastPos is not None
             bitpainter.drawLine(self.lastPos, e.position())
         bitpainter.end()
         
@@ -1095,6 +1071,7 @@ class ImageMask(ImageDisplayer,DataObject):
         else:
             self.pen.setColor(colors[self.drawMode]);
             pixpainter.setPen(self.pen);
+            assert self.lastPos is not None
             pixpainter.drawLine(self.lastPos, e.position())
         pixpainter.end();
 
@@ -1122,13 +1099,13 @@ class ImageMask(ImageDisplayer,DataObject):
         return [self.fgColor,self.bgColor][::-1 if invert else 1];
 
     def getBitColors(self,invert=False):
-        return [Defaults.bmapFG,Defaults.bmapBG][::-1 if invert else 1];
+        return [ImageMask.bmapFG,ImageMask.bmapBG][::-1 if invert else 1];
 
     def reloadPixLayer(self): 
         print("pix layer reloaded");
         self.pixlayer = QPixmap(self.bitlayer.size());
         self.blankLayer = QPixmap(self.pixlayer.size());
-        self.blankLayer.fill(Defaults.blankColor);
+        self.blankLayer.fill(QColor(Defaults.blankColor));
         fg,bg = self.getPixColors();
         self.pixlayer.fill(fg)
         pixptr = QPainter(self.pixlayer);
@@ -1157,12 +1134,12 @@ class ImageMask(ImageDisplayer,DataObject):
 
     def setFGColor(self,colour):
         self.fgColor = colour;
-        print(f"Fg color set: {colour.name(QColor.NameFormat.HexArgb)}")
+        print(f"Fg color set: {colour.name(QtGui.QColor.NameFormat.HexArgb)}")
         self.reloadPixLayer()
     
     def setBGColor(self,colour):
         self.bgColor = colour;
-        print(f"Bg color set: {colour.name(QColor.NameFormat.HexArgb)}")
+        print(f"Bg color set: {colour.name(QtGui.QColor.NameFormat.HexArgb)}")
         self.reloadPixLayer()
 
     @pyqtSlot(int)
@@ -1422,19 +1399,19 @@ class NextPrevButtons(QWidget,DataObject):
 
 class ColorButtons(QWidget,DataObject):
     resetIconPath = "./reset.png"
-    fgColorChanged = pyqtSignal(QColor)
-    bgColorChanged = pyqtSignal(QColor)
+    fgColorChanged = pyqtSignal(QtGui.QColor)
+    bgColorChanged = pyqtSignal(QtGui.QColor)
 
     def __init__(self,parent=None):
         super().__init__(parent)
         self.createObjects();
 
     def createObjects(self):
-        self.fgColorButton = ColorButton(color=Defaults.defaultFG,allow_alpha=True)
+        self.fgColorButton = ColorButton(color=QColor(Defaults.defaultFG),allow_alpha=True)
         self.fgColorButton.colorChanged.connect(self.fgColorChanged.emit)
         self.fgColorButton.setToolTip("Foreground Color")
 
-        self.bgColorButton = ColorButton(color=Defaults.defaultBG,allow_alpha=True)
+        self.bgColorButton = ColorButton(color=QColor(Defaults.defaultBG),allow_alpha=True)
         self.bgColorButton.colorChanged.connect(self.bgColorChanged.emit)
         self.bgColorButton.setToolTip("Background Color")
         
@@ -1468,7 +1445,7 @@ class ColorButtons(QWidget,DataObject):
         return self.bgColorButton.color()
 
     def getSaveData(self):
-        return (self.fgColor.name(QColor.NameFormat.HexArgb),self.bgColor.name(QColor.NameFormat.HexArgb))
+        return (self.fgColor.name(QtGui.QColor.NameFormat.HexArgb),self.bgColor.name(QtGui.QColor.NameFormat.HexArgb))
 
 
 class ZoomButtons(QWidget,DataObject):
@@ -1818,6 +1795,7 @@ class ImageSelectorPane(QWidget,DataObject):
                 else:
                     result.append((self.workingDirectory + working[0],os.path.splitext(working[0])[0]));
             elif len(original) > 0:
+                assert self.maskDirChooser.dire is not None
                 result.append((Path(self.maskDirChooser.dire)/original[0],original[0]));
             elif Defaults.createEmptyMasksForExport and includeModify:
                 ext = self.exportPane.maskExt() if self.exportPane else Defaults.defaultMaskFormat;
@@ -1983,6 +1961,7 @@ class ImageSelectorPane(QWidget,DataObject):
                     maskData = self.readMask(maskPath)
                     self.maskChanged.emit(maskData,maskName)
                 else:
+                    assert self.currentImage is not None
                     maskName = os.path.basename(self.currentImage)
                     self.maskChanged.emit(None,maskName)
                 
@@ -2096,6 +2075,7 @@ class DirectorySelector(QWidget):
         self.browseButton.clicked.connect(lambda: self.checkDialog(self.selectDirectory));
 
     def revealInExplorer(self):
+        assert self.dire is not None
         webbrowser.open(os.path.realpath(self.dire))
 
     @pyqtSlot()
@@ -2126,7 +2106,7 @@ class DirectorySelector(QWidget):
         self.setDirectory(None,emit=emit);
     
     def setDirectory(self,dire,emit=True):
-        if dire and not(os.path.exists(dire)):
+        if dire is not None and not(os.path.exists(dire)):
             print(f"Error: attempting to set invalid directory {dire}; setting to none");
             dire=None;
         print(f"Selected Directory: {dire}");
@@ -2830,7 +2810,7 @@ class QMainSegmentWindow(QMainWindow,DataObject):
     def __init__(self,customDataModule:Union[IOModule,None]=None,session:Union[str,None]=Defaults.sessionFileName):
         super().__init__();
         self.setStatusBar(SegmenterStatusBar());
-        self.setWindowTitle("Mask Editor v0.4");
+        self.setWindowTitle("Mask Editor v0.6");
         self.segmenter = MaskSegmenter(self,parent=self,status=self.statusBar(),customData=customDataModule,session=session);
         self.setCentralWidget(self.segmenter);
         self.createActions();

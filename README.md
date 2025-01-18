@@ -22,6 +22,12 @@ If for whatever reason, something does go wrong, your masks will still be stored
 
 *hopefully
 
+## Setting Custom Defaults
+As a somewhat temporary measure before a more robust session saving/export system, you can now set custom default values for certain paramteters. These will be used even if using the editor from a parent process, as described below. See the custom_defaults_template.py file for more info.
+
+## Running as a Child Process
+As of v0.6, maskeditor supports running as a child process from another application. The function of use is editMaskStack, which takes a sequence of images and an optional sequence of masks and opens a variant of the maskeditor window which allows users to edit the provided masks. Still to do is a better interface for showing the position of the current image in the sequence, as the image selector pane is absent, and a way to manage defaults and sessions through keyword arguments.
+
 ## More
 See the Help tab in the program itself for more information. 
 

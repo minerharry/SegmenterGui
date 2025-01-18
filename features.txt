@@ -20,6 +20,7 @@ mask folders
 
 background/foreground color&alpha
 -outline/area mode (more technically challenging)
+-customizable FG/BG colors (including alpha channel)
 
 cache/save-some, save-all
 -navigation should feel smooth and fast (same ideaas the shortcuts)
