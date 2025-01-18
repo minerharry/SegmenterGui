@@ -2810,7 +2810,7 @@ class QMainSegmentWindow(QMainWindow,DataObject):
     def __init__(self,customDataModule:Union[IOModule,None]=None,session:Union[str,None]=Defaults.sessionFileName):
         super().__init__();
         self.setStatusBar(SegmenterStatusBar());
-        self.setWindowTitle("Mask Editor v0.4");
+        self.setWindowTitle("Mask Editor v0.6");
         self.segmenter = MaskSegmenter(self,parent=self,status=self.statusBar(),customData=customDataModule,session=session);
         self.setCentralWidget(self.segmenter);
         self.createActions();
