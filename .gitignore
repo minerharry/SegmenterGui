@@ -11,3 +11,7 @@ session_dat.json
 testing/
 export.flag
 .vscode/
+images.npy
+masks.npy
+testIOPane.py
+custom_defaults.py

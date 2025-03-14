@@ -147,7 +147,7 @@ class RangeSlider(QWidget):
             print(e.with_traceback(None));
 
     def mousePressEvent(self, event: QMouseEvent):
-        print("range slider - mouse press event");
+        # print("range slider - mouse press event");
         #IMPORTANT: the click check order is the reverse of the draw order to ensure that the handle that is drawn second - ie, the one that looks "on top" - is given selection priority
         try:
             if self._first_sc != QStyle.SubControl.SC_SliderHandle:
