@@ -58,6 +58,8 @@ keyboard shortcut settings / config file
 fill tool - all contiguous area [of fg/bg]
 --import/export session - with options to include/exclude working masks
 
+Reorganize next/prev buttons to be below a text box with mask identifier (for selector pane-less navigation) (GET IT)
+Make wide buttons collapsible into icons (like next-prev, adjust, revert, etc)
 
 Captive Mode - launch maskeditor from other program with hijacked I/O
 - Create modified version of ImageSelectorPane.
