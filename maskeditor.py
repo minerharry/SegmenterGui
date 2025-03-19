@@ -2675,7 +2675,7 @@ class QStringListValidator(QValidator):
 class ImageStackIOPane(IOModule):
     autosave_full = pyqtSignal([object])
     autosave_single = pyqtSignal([object,int])
-    mask_cleared = pyqtSignal()
+    masks_cleared = pyqtSignal()
 
     def __init__(self, parent: Optional['QWidget'] = None,) -> None:
         super().__init__(parent)
@@ -2708,7 +2708,7 @@ class ImageStackIOPane(IOModule):
         self.sourceMasks = masks;
         self.workingMasks = {};
     
-        self.mask_cleared.emit()
+        self.masks_cleared.emit()
         self._autosave()
         
 
@@ -2757,7 +2757,7 @@ class ImageStackIOPane(IOModule):
     def clearAllMasks(self) -> None:
         self.workingMasks = {}
         
-        self.mask_cleared.emit()
+        self.masks_cleared.emit()
         self._autosave()
 
 
