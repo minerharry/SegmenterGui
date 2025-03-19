@@ -23,7 +23,7 @@ import shutil
 import json_tricks as json
 import inspect
 import circleutil
-from typing import Any, ClassVar, Optional, Protocol, Union,List,Tuple, cast
+from typing import Any, Callable, ClassVar, Optional, Protocol, Union,List,Tuple, cast
 from skimage.transform import resize
 from skimage.exposure import rescale_intensity
 from pathlib import Path
@@ -2673,11 +2673,12 @@ class QStringListValidator(QValidator):
 
 class ImageStackIOPane(IOModule):
 
-    def __init__(self, parent: Optional['QWidget'] = None) -> None:
+    def __init__(self, parent: Optional['QWidget'] = None, save_callback:Optional[Callable[[np.ndarray,int],Any]]=None) -> None:
         super().__init__(parent)
         self.imageStack:Union[np.ndarray,None] = None
         self.sourceMasks:Union[np.ndarray,None] = None
         self.workingMasks:Union[dict[int,np.ndarray],None] = None
+        self.callback = save_callback;
         self.currentIndex = None;
 
     def loadImageStack(self,imageStack:Union[np.ndarray,None],masks:Union[np.ndarray,None]=None):
@@ -2717,10 +2718,13 @@ class ImageStackIOPane(IOModule):
 
     def saveMask(self, mask: np.ndarray, identifier: int) -> None:
         assert self.workingMasks is not None
-        print(f"saving mask with identifier {identifier} to workingMasks dictionary ")
+        print(f"saving mask with identifier {identifier} to working masks dictionary")
         if len(mask.shape) > 2:
             mask = mask[:,:,0]
         self.workingMasks[identifier] = mask
+
+        if self.callback:
+            self.callback(mask,identifier)
 
     def incrementImage(self, inc) -> None:
         if self.imageStack is None:
@@ -2942,10 +2946,10 @@ def init_logger():
             logLevel)
 
 
-def editMaskStack(images:np.ndarray,masks:Union[np.ndarray,None])->Union[np.ndarray,None]:
+def editMaskStack(images:np.ndarray,masks:Union[np.ndarray,None],save_callback:Callable[[np.ndarray,int],Any]|None=None)->Union[np.ndarray,None]:
     print(f"editing images of shape {images.shape}" + (f"with starting masks of shape {masks.shape}" if masks is not None else ""))
     app = QApplication([])
-    dataModule = ImageStackIOPane();
+    dataModule = ImageStackIOPane(save_callback=save_callback);
     dataModule.loadImageStack(images,masks);
     window = QMainSegmentWindow(customDataModule=dataModule,session=None);
     window.show();
@@ -2954,6 +2958,14 @@ def editMaskStack(images:np.ndarray,masks:Union[np.ndarray,None])->Union[np.ndar
 
 def unstack(a, axis=0):
     return np.moveaxis(a, axis, 0)
+
+#makes invisible errors get printed
+sys._excepthook = sys.excepthook 
+def exception_hook(exctype, value, traceback):
+    print(exctype, value, traceback)
+    sys._excepthook(exctype, value, traceback) 
+    sys.exit(1) 
+sys.excepthook = exception_hook 
 
 if __name__ == '__main__':
     if Defaults.loadMode == LoadMode.biof:
