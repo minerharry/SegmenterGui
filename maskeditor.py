@@ -1339,6 +1339,16 @@ class DualToggleButtons(QWidget,DataObject):
         self.buttonWidget.layout().setContentsMargins(0,0,0,0)
 
         self.buttons = [QToolButton() for _ in buttonNames];
+        import platform
+        # if platform.system() == "Windows" and platform.release() == "11":
+        style = \
+        """QToolButton:checked{
+                color: rgb(180, 180, 200);
+            }"""
+        print("style updated for windows 11!")
+        [but.setStyleSheet(style) for but in self.buttons]
+        # else:
+        #     raise Exception(platform.system(),platform.release())
         [self.buttonWidget.layout().addWidget(button) for button in self.buttons];
         [button.setText(name) for button,name in zip(self.buttons,buttonNames)];
         [button.setCheckable(True) for button in self.buttons];
