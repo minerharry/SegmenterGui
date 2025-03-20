@@ -15,3 +15,6 @@ images.npy
 masks.npy
 testIOPane.py
 custom_defaults.py
+maskeditor.err
+maskeditor.log
+file
