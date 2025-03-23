@@ -3026,6 +3026,8 @@ def editMaskStack(images:np.ndarray,masks:Union[np.ndarray,None],
         file_handler = logging.FileHandler(debug_log or 'maskeditor.qt.log')
         file_handler.setLevel(logging.DEBUG)
         log.addHandler(file_handler)
+    else:
+        log = None
 
     window = QMainSegmentWindow(customDataModule=dataModule,session=None,debug_log=log);
     window.show();
