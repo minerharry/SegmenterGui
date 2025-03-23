@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 from ast import literal_eval
 from copy import copy
 from dataclasses import dataclass
+from logging import Logger
+import logging
 import time
 from ColorButton import ColorButton
 from enum import Enum
@@ -12,7 +14,7 @@ from PyQt6 import QtGui
 from PyQt6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 from PyQt6.QtWidgets import QAbstractItemView, QAbstractSlider, QApplication, QCheckBox, QComboBox, QCompleter, QDialog, QFileDialog, QGraphicsPathItem, QGraphicsScene, QGraphicsView, QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit, QListView, QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QSlider, QSplitter, QStatusBar, QStyle, QStyleOptionFrame, QToolButton, QVBoxLayout, QWidget, QWhatsThis
 from PyQt6 import QtCore
-from PyQt6.QtCore import QFile, QLineF, QMargins, QMarginsF, QPoint, QPointF, QRect, QRectF, QSignalMapper, QSize, QStringListModel, QTimer, Qt, pyqtSignal, pyqtSlot, QObject, QEvent, QUrl, QCoreApplication, QByteArray, QIODevice, QBuffer
+from PyQt6.QtCore import QFile, QLineF, QMargins, QMarginsF, QPoint, QPointF, QRect, QRectF, QSignalMapper, QSize, QStringListModel, QTimer, Qt, pyqtSignal, pyqtSlot, QObject, QEvent, QUrl, QCoreApplication, QByteArray, QIODevice, QBuffer, QtMsgType, qInstallMessageHandler
 from PyQt6.QtGui import QAction, QBitmap, QBrush, QCloseEvent, QCursor, QDoubleValidator, QFontMetrics, QColor, QGuiApplication, QIcon, QImage, QImageWriter, QIntValidator, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QPolygon, QPolygonF, QShortcut, QKeySequence, QTextDocument, QTransform, QUndoCommand, QUndoStack, QValidator
 import numpy as np
 import math
@@ -2842,10 +2844,36 @@ class AcceptChangesDialog(QDialog):
         self.done(self.ChangeSignal.exit_reject)
 
 
+def debug_logging(log:Logger|str|None):
+    if isinstance(log,str):
+        log = logging.getLogger(log)
+    elif not log:
+        log = logging.getLogger();
+    def qt_message_handler(mode, context, message):
+        if mode == QtMsgType.QtInfoMsg:
+            mode = logging.INFO
+        elif mode == QtMsgType.QtWarningMsg:
+            mode = logging.WARNING
+        elif mode == QtMsgType.QtCriticalMsg:
+            mode = logging.CRITICAL
+        elif mode == QtMsgType.QtFatalMsg:
+            mode = logging.FATAL
+        else:
+            mode = logging.DEBUG
+        log.log(mode,'qt_message_handler: line: %d, func: %s(), file: %s' % (
+            context.line, context.function, context.file))
+        log.log(mode,'  %s: %s\n' % (logging.getLevelName(mode), message))
+
+    qInstallMessageHandler(qt_message_handler)
 
 class QMainSegmentWindow(QMainWindow,DataObject):
-    def __init__(self,customDataModule:Union[IOModule,None]=None,session:Union[str,None]=Defaults.sessionFileName):
+    def __init__(self,customDataModule:Union[IOModule,None]=None,session:Union[str,None]=Defaults.sessionFileName,debug_log:bool|str|Logger=False):
         super().__init__();
+
+        if debug_log:
+            debug_logging(debug_log)
+            
+
         self.setStatusBar(SegmenterStatusBar());
         self.setWindowTitle("Mask Editor v0.6");
         self.segmenter = MaskSegmenter(self,parent=self,status=self.statusBar(),customData=customDataModule,session=session);
@@ -2979,7 +3007,12 @@ def init_logger():
             logLevel)
 
 
-def editMaskStack(images:np.ndarray,masks:Union[np.ndarray,None],save_callback:Optional[Callable[[np.ndarray,int],Any]]=None,save_callback_full:Optional[Callable[[Sequence[np.ndarray]],Any]]=None,clear_callback:Optional[Callable[[],Any]]=None)->Union[np.ndarray,None]:
+def editMaskStack(images:np.ndarray,masks:Union[np.ndarray,None],
+                  debug_log:str|Path|None=None,
+                  save_callback:Optional[Callable[[np.ndarray,int],Any]]=None,
+                  save_callback_full:Optional[Callable[[Sequence[np.ndarray]],Any]]=None,
+                  clear_callback:Optional[Callable[[],Any]]=None)->Union[np.ndarray,None]:
+
     print(f"editing images of shape {images.shape}" + (f"with starting masks of shape {masks.shape}" if masks is not None else ""))
     app = QApplication([])
     dataModule = ImageStackIOPane();
@@ -2987,7 +3020,14 @@ def editMaskStack(images:np.ndarray,masks:Union[np.ndarray,None],save_callback:O
     if save_callback_full: dataModule.autosave_full.connect(save_callback_full)
     if clear_callback: dataModule.masks_cleared.connect(clear_callback)
     dataModule.loadImageStack(images,masks);
-    window = QMainSegmentWindow(customDataModule=dataModule,session=None);
+
+    if debug_log:
+        log = Logger('Maskeditor');
+        file_handler = logging.FileHandler(debug_log or 'maskeditor.qt.log')
+        file_handler.setLevel(logging.DEBUG)
+        log.addHandler(file_handler)
+
+    window = QMainSegmentWindow(customDataModule=dataModule,session=None,debug_log=log);
     window.show();
     app.exec();
     return dataModule.export()
@@ -3007,11 +3047,25 @@ def exception_hook(exctype, value, traceback):
 sys.excepthook = exception_hook 
 
 if __name__ == '__main__':
+    log = False
+    if "--log" in sys.argv:
+        log = True
+        sys.argv.remove('--log')
+    if '-L' in sys.argv:
+        log = True
+        sys.argv.remove('L')
+    if log:
+        print("Logging enabled")
+        log = Logger('Maskeditor');
+        file_handler = logging.FileHandler('maskeditor.qt.log')
+        file_handler.setLevel(logging.DEBUG)
+        log.addHandler(file_handler)
+
     if Defaults.loadMode == LoadMode.biof:
         javabridge.start_vm(class_path=bf.JARS);
         init_logger();
     app = QApplication(sys.argv)
-    window = QMainSegmentWindow();
+    window = QMainSegmentWindow(debug_log=log);
     window.show();
     app.exec();
     if Defaults.loadMode == LoadMode.biof:

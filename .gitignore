@@ -18,3 +18,4 @@ custom_defaults.py
 maskeditor.err
 maskeditor.log
 file
+maskeditor.qt.log
