@@ -1,1 +1,1 @@
-python "C:\Users\Harrison Truscott\Documents\GitHub\SegmenterGui\maskeditor.py"
+python maskeditor.py

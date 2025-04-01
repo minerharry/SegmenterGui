@@ -2,6 +2,9 @@ from abc import ABC, abstractmethod
 from ast import literal_eval
 from copy import copy
 from dataclasses import dataclass
+from logging import Logger
+import logging
+import time
 from ColorButton import ColorButton
 from enum import Enum
 import parsend
@@ -11,7 +14,7 @@ from PyQt6 import QtGui
 from PyQt6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 from PyQt6.QtWidgets import QAbstractItemView, QAbstractSlider, QApplication, QCheckBox, QComboBox, QCompleter, QDialog, QFileDialog, QGraphicsPathItem, QGraphicsScene, QGraphicsView, QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit, QListView, QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QSlider, QSplitter, QStatusBar, QStyle, QStyleOptionFrame, QToolButton, QVBoxLayout, QWidget, QWhatsThis
 from PyQt6 import QtCore
-from PyQt6.QtCore import QFile, QLineF, QMargins, QMarginsF, QPoint, QPointF, QRect, QRectF, QSignalMapper, QSize, QStringListModel, QTimer, Qt, pyqtSignal, pyqtSlot, QObject, QEvent, QUrl, QCoreApplication, QByteArray, QIODevice, QBuffer
+from PyQt6.QtCore import QFile, QLineF, QMargins, QMarginsF, QPoint, QPointF, QRect, QRectF, QSignalMapper, QSize, QStringListModel, QTimer, Qt, pyqtSignal, pyqtSlot, QObject, QEvent, QUrl, QCoreApplication, QByteArray, QIODevice, QBuffer, QtMsgType, qInstallMessageHandler
 from PyQt6.QtGui import QAction, QBitmap, QBrush, QCloseEvent, QCursor, QDoubleValidator, QFontMetrics, QColor, QGuiApplication, QIcon, QImage, QImageWriter, QIntValidator, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QPolygon, QPolygonF, QShortcut, QKeySequence, QTextDocument, QTransform, QUndoCommand, QUndoStack, QValidator
 import numpy as np
 import math
@@ -23,7 +26,7 @@ import shutil
 import json_tricks as json
 import inspect
 import circleutil
-from typing import Any, ClassVar, Optional, Protocol, Union,List,Tuple, cast
+from typing import Any, Callable, ClassVar, Optional, Protocol, Sequence, Union,List,Tuple, cast
 from skimage.transform import resize
 from skimage.exposure import rescale_intensity
 from pathlib import Path
@@ -1338,6 +1341,16 @@ class DualToggleButtons(QWidget,DataObject):
         self.buttonWidget.layout().setContentsMargins(0,0,0,0)
 
         self.buttons = [QToolButton() for _ in buttonNames];
+        import platform
+        # if platform.system() == "Windows" and platform.release() == "11":
+        style = \
+        """QToolButton:checked{
+                color: rgb(180, 180, 200);
+            }"""
+        print("style updated for windows 11!")
+        [but.setStyleSheet(style) for but in self.buttons]
+        # else:
+        #     raise Exception(platform.system(),platform.release())
         [self.buttonWidget.layout().addWidget(button) for button in self.buttons];
         [button.setText(name) for button,name in zip(self.buttons,buttonNames)];
         [button.setCheckable(True) for button in self.buttons];
@@ -2672,13 +2685,24 @@ class QStringListValidator(QValidator):
 
 
 class ImageStackIOPane(IOModule):
+    autosave_full = pyqtSignal([object])
+    autosave_single = pyqtSignal([object,int])
+    masks_cleared = pyqtSignal()
 
-    def __init__(self, parent: Optional['QWidget'] = None) -> None:
+    def __init__(self, parent: Optional['QWidget'] = None,) -> None:
         super().__init__(parent)
         self.imageStack:Union[np.ndarray,None] = None
         self.sourceMasks:Union[np.ndarray,None] = None
         self.workingMasks:Union[dict[int,np.ndarray],None] = None
         self.currentIndex = None;
+    
+    def _autosave(self):
+        print("ImageStackIOPane: Considering autosave")
+        if self.receivers(self.autosave_full) > 0: #only do the work if needed
+            self.autosave_full.emit(self.export())
+            print("autosave callback emitted")
+        else:
+            print("No callback registered - no autosave")
 
     def loadImageStack(self,imageStack:Union[np.ndarray,None],masks:Union[np.ndarray,None]=None):
         if imageStack is not None and masks is not None: assert len(imageStack) == len(masks);
@@ -2695,6 +2719,10 @@ class ImageStackIOPane(IOModule):
             assert len(self.imageStack) == len(masks)
         self.sourceMasks = masks;
         self.workingMasks = {};
+    
+        self.masks_cleared.emit()
+        self._autosave()
+        
 
     def createObjects(self):
         self.setFixedWidth(0)
@@ -2717,10 +2745,14 @@ class ImageStackIOPane(IOModule):
 
     def saveMask(self, mask: np.ndarray, identifier: int) -> None:
         assert self.workingMasks is not None
-        print(f"saving mask with identifier {identifier} to workingMasks dictionary ")
+        print(f"saving mask with identifier {identifier} to working masks dictionary2")
         if len(mask.shape) > 2:
             mask = mask[:,:,0]
+
         self.workingMasks[identifier] = mask
+
+        self.autosave_single.emit(mask,identifier)
+        self._autosave()
 
     def incrementImage(self, inc) -> None:
         if self.imageStack is None:
@@ -2731,13 +2763,20 @@ class ImageStackIOPane(IOModule):
         assert self.workingMasks is not None
         del self.workingMasks[self.currentIndex]
 
+        self.autosave_single.emit(self.sourceMasks[self.currentIndex] if self.sourceMasks else None,self.currentIndex)
+        self._autosave()
+
     def clearAllMasks(self) -> None:
         self.workingMasks = {}
+        
+        self.masks_cleared.emit()
+        self._autosave()
+
 
     def installEventFilters(self, filter: QObject) -> None:
         pass;
 
-    def export(self)->Union[np.ndarray,None]:        
+    def export(self)->Union[np.ndarray,None]:
         assert self.imageStack is not None;
         if self.workingMasks is None: #changes were rejected
             # print("Changes rejected, returning None")
@@ -2805,10 +2844,36 @@ class AcceptChangesDialog(QDialog):
         self.done(self.ChangeSignal.exit_reject)
 
 
+def debug_logging(log:Logger|str|None):
+    if isinstance(log,str):
+        log = logging.getLogger(log)
+    elif not log:
+        log = logging.getLogger();
+    def qt_message_handler(mode, context, message):
+        if mode == QtMsgType.QtInfoMsg:
+            mode = logging.INFO
+        elif mode == QtMsgType.QtWarningMsg:
+            mode = logging.WARNING
+        elif mode == QtMsgType.QtCriticalMsg:
+            mode = logging.CRITICAL
+        elif mode == QtMsgType.QtFatalMsg:
+            mode = logging.FATAL
+        else:
+            mode = logging.DEBUG
+        log.log(mode,'qt_message_handler: line: %d, func: %s(), file: %s' % (
+            context.line, context.function, context.file))
+        log.log(mode,'  %s: %s\n' % (logging.getLevelName(mode), message))
+
+    qInstallMessageHandler(qt_message_handler)
 
 class QMainSegmentWindow(QMainWindow,DataObject):
-    def __init__(self,customDataModule:Union[IOModule,None]=None,session:Union[str,None]=Defaults.sessionFileName):
+    def __init__(self,customDataModule:Union[IOModule,None]=None,session:Union[str,None]=Defaults.sessionFileName,debug_log:bool|str|Logger=False):
         super().__init__();
+
+        if debug_log:
+            debug_logging(debug_log)
+            
+
         self.setStatusBar(SegmenterStatusBar());
         self.setWindowTitle("Mask Editor v0.6");
         self.segmenter = MaskSegmenter(self,parent=self,status=self.statusBar(),customData=customDataModule,session=session);
@@ -2942,12 +3007,29 @@ def init_logger():
             logLevel)
 
 
-def editMaskStack(images:np.ndarray,masks:Union[np.ndarray,None])->Union[np.ndarray,None]:
+def editMaskStack(images:np.ndarray,masks:Union[np.ndarray,None],
+                  debug_log:str|Path|None=None,
+                  save_callback:Optional[Callable[[np.ndarray,int],Any]]=None,
+                  save_callback_full:Optional[Callable[[Sequence[np.ndarray]],Any]]=None,
+                  clear_callback:Optional[Callable[[],Any]]=None)->Union[np.ndarray,None]:
+
     print(f"editing images of shape {images.shape}" + (f"with starting masks of shape {masks.shape}" if masks is not None else ""))
     app = QApplication([])
     dataModule = ImageStackIOPane();
+    if save_callback: dataModule.autosave_single.connect(save_callback)
+    if save_callback_full: dataModule.autosave_full.connect(save_callback_full)
+    if clear_callback: dataModule.masks_cleared.connect(clear_callback)
     dataModule.loadImageStack(images,masks);
-    window = QMainSegmentWindow(customDataModule=dataModule,session=None);
+
+    if debug_log:
+        log = Logger('Maskeditor');
+        file_handler = logging.FileHandler(debug_log or 'maskeditor.qt.log')
+        file_handler.setLevel(logging.DEBUG)
+        log.addHandler(file_handler)
+    else:
+        log = None
+
+    window = QMainSegmentWindow(customDataModule=dataModule,session=None,debug_log=log);
     window.show();
     app.exec();
     return dataModule.export()
@@ -2955,12 +3037,37 @@ def editMaskStack(images:np.ndarray,masks:Union[np.ndarray,None])->Union[np.ndar
 def unstack(a, axis=0):
     return np.moveaxis(a, axis, 0)
 
+#makes invisible errors get printed
+sys._excepthook = sys.excepthook 
+def exception_hook(exctype, value, traceback):
+    print("exception interrupted")
+    print(exctype, value, traceback)
+    import traceback as tb
+    print("\n".join(tb.format_exception(exctype,value,traceback)))
+    sys._excepthook(exctype, value, traceback) 
+    sys.exit(1) 
+sys.excepthook = exception_hook 
+
 if __name__ == '__main__':
+    log = False
+    if "--log" in sys.argv:
+        log = True
+        sys.argv.remove('--log')
+    if '-L' in sys.argv:
+        log = True
+        sys.argv.remove('L')
+    if log:
+        print("Logging enabled")
+        log = Logger('Maskeditor');
+        file_handler = logging.FileHandler('maskeditor.qt.log')
+        file_handler.setLevel(logging.DEBUG)
+        log.addHandler(file_handler)
+
     if Defaults.loadMode == LoadMode.biof:
         javabridge.start_vm(class_path=bf.JARS);
         init_logger();
     app = QApplication(sys.argv)
-    window = QMainSegmentWindow();
+    window = QMainSegmentWindow(debug_log=log);
     window.show();
     app.exec();
     if Defaults.loadMode == LoadMode.biof:
